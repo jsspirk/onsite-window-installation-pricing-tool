@@ -1,0 +1,2667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0C0E14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>FastGlass Field Pricer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800&family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    /* ================================================================
+       DESIGN TOKENS
+    ================================================================ */
+    :root {
+      --bg-0: #090B10;
+      --bg-1: #0F1219;
+      --bg-2: #161B26;
+      --bg-3: #1E2433;
+      --bg-card: #192030;
+      --bg-input: #111520;
+
+      --amber: #F59E0B;
+      --amber-dim: #B45309;
+      --amber-glow: rgba(245,158,11,0.15);
+      --amber-bg: rgba(245,158,11,0.08);
+
+      --green: #10B981;
+      --green-bg: rgba(16,185,129,0.1);
+      --red: #EF4444;
+      --red-bg: rgba(239,68,68,0.1);
+      --orange: #F97316;
+      --orange-bg: rgba(249,115,22,0.1);
+      --blue: #3B82F6;
+      --blue-bg: rgba(59,130,246,0.1);
+
+      --text-0: #F0F4FF;
+      --text-1: #B0BBCC;
+      --text-2: #6B7A8D;
+      --text-3: #3D4858;
+
+      --border-0: #252E42;
+      --border-1: #1C2435;
+
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --radius-xl: 22px;
+
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
+      --shadow-md: 0 4px 16px rgba(0,0,0,0.5);
+      --shadow-lg: 0 8px 32px rgba(0,0,0,0.6);
+
+      --font-title: 'Barlow Condensed', sans-serif;
+      --font-semi: 'Barlow Semi Condensed', sans-serif;
+      --font-body: 'Barlow', sans-serif;
+
+      --touch-target: 52px;
+      --header-height: 60px;
+    }
+
+    /* ================================================================
+       RESET & BASE
+    ================================================================ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { height: 100%; -webkit-tap-highlight-color: transparent; }
+    body {
+      height: 100%;
+      background: var(--bg-0);
+      color: var(--text-0);
+      font-family: var(--font-body);
+      font-size: 16px;
+      line-height: 1.5;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+    input, select, textarea, button { font-family: inherit; }
+    a { color: inherit; text-decoration: none; }
+
+    /* ================================================================
+       APP SHELL
+    ================================================================ */
+    #app {
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .screen {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      min-height: 100dvh;
+      animation: fadeIn 0.18s ease;
+    }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+
+    /* ================================================================
+       HEADER / NAV BAR
+    ================================================================ */
+    .app-header {
+      height: var(--header-height);
+      background: var(--bg-1);
+      border-bottom: 1px solid var(--border-1);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      flex-shrink: 0;
+    }
+    .header-left { display: flex; align-items: center; gap: 10px; }
+    .header-logo {
+      font-family: var(--font-title);
+      font-weight: 800;
+      font-size: 22px;
+      letter-spacing: 0.5px;
+      color: var(--amber);
+      text-transform: uppercase;
+    }
+    .header-title {
+      font-family: var(--font-semi);
+      font-weight: 700;
+      font-size: 16px;
+      color: var(--text-0);
+    }
+    .header-back-btn {
+      width: 44px; height: 44px;
+      display: flex; align-items: center; justify-content: center;
+      background: none; border: none; cursor: pointer;
+      color: var(--text-1);
+      border-radius: var(--radius-sm);
+      font-size: 22px;
+      transition: color 0.15s;
+    }
+    .header-back-btn:active { color: var(--amber); }
+    .header-right { display: flex; align-items: center; gap: 8px; }
+    .offline-badge {
+      background: var(--orange-bg);
+      border: 1px solid var(--orange);
+      color: var(--orange);
+      font-family: var(--font-title);
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 4px;
+    }
+    .online-badge {
+      background: var(--green-bg);
+      border: 1px solid var(--green);
+      color: var(--green);
+      font-family: var(--font-title);
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 4px;
+    }
+    .icon-btn {
+      width: var(--touch-target); height: var(--touch-target);
+      display: flex; align-items: center; justify-content: center;
+      background: none; border: none; cursor: pointer;
+      color: var(--text-1); font-size: 20px;
+      border-radius: var(--radius-sm);
+      transition: color 0.15s, background 0.15s;
+    }
+    .icon-btn:active { color: var(--amber); background: var(--amber-bg); }
+
+    /* ================================================================
+       TYPOGRAPHY
+    ================================================================ */
+    .display-price {
+      font-family: var(--font-title);
+      font-weight: 800;
+      font-size: 52px;
+      line-height: 1;
+      color: var(--amber);
+      letter-spacing: -1px;
+    }
+    .display-price-sm {
+      font-family: var(--font-title);
+      font-weight: 700;
+      font-size: 32px;
+      line-height: 1;
+      color: var(--amber);
+    }
+    .screen-title {
+      font-family: var(--font-title);
+      font-weight: 700;
+      font-size: 26px;
+      letter-spacing: 0.3px;
+      color: var(--text-0);
+    }
+    .section-label {
+      font-family: var(--font-title);
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-2);
+    }
+    .mono {
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    /* ================================================================
+       BUTTONS
+    ================================================================ */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      min-height: var(--touch-target);
+      padding: 0 24px;
+      border: none; border-radius: var(--radius-md);
+      font-family: var(--font-title);
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+      text-transform: uppercase;
+    }
+    .btn-primary {
+      background: var(--amber);
+      color: #000;
+    }
+    .btn-primary:active { background: var(--amber-dim); transform: scale(0.98); }
+    .btn-secondary {
+      background: var(--bg-3);
+      color: var(--text-0);
+      border: 1px solid var(--border-0);
+    }
+    .btn-secondary:active { background: var(--bg-2); transform: scale(0.98); }
+    .btn-danger {
+      background: var(--red-bg);
+      color: var(--red);
+      border: 1px solid var(--red);
+    }
+    .btn-danger:active { opacity: 0.75; transform: scale(0.98); }
+    .btn-success {
+      background: var(--green);
+      color: #000;
+    }
+    .btn-success:active { opacity: 0.85; transform: scale(0.98); }
+    .btn-ghost {
+      background: none;
+      color: var(--amber);
+      border: 1px solid var(--amber);
+    }
+    .btn-ghost:active { background: var(--amber-bg); transform: scale(0.98); }
+    .btn-full { width: 100%; }
+    .btn-sm { min-height: 40px; padding: 0 16px; font-size: 14px; }
+    .btn:disabled { opacity: 0.4; pointer-events: none; }
+
+    /* ================================================================
+       FORM ELEMENTS
+    ================================================================ */
+    .form-group { display: flex; flex-direction: column; gap: 8px; }
+    .form-label {
+      font-family: var(--font-title);
+      font-weight: 600;
+      font-size: 12px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--text-2);
+    }
+    .form-input {
+      height: var(--touch-target);
+      padding: 0 16px;
+      background: var(--bg-input);
+      border: 1.5px solid var(--border-0);
+      border-radius: var(--radius-md);
+      color: var(--text-0);
+      font-family: var(--font-body);
+      font-size: 17px;
+      font-weight: 500;
+      transition: border-color 0.15s;
+      -webkit-appearance: none;
+    }
+    .form-input:focus {
+      outline: none;
+      border-color: var(--amber);
+      background: var(--bg-2);
+    }
+    .form-input::placeholder { color: var(--text-3); }
+    .form-input.error { border-color: var(--red); }
+
+    .form-input-large {
+      height: 70px;
+      font-family: var(--font-title);
+      font-weight: 700;
+      font-size: 36px;
+      text-align: center;
+      letter-spacing: -0.5px;
+    }
+    .input-hint { font-size: 12px; color: var(--text-2); }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+    /* Chip selector */
+    .chip-group { display: flex; gap: 8px; flex-wrap: wrap; }
+    .chip {
+      min-height: 44px;
+      padding: 0 16px;
+      background: var(--bg-3);
+      border: 1.5px solid var(--border-0);
+      border-radius: 100px;
+      color: var(--text-1);
+      font-family: var(--font-semi);
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex; align-items: center; gap: 6px;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .chip:active, .chip.active {
+      background: var(--amber-bg);
+      border-color: var(--amber);
+      color: var(--amber);
+    }
+    .chip.active { cursor: default; }
+    .chip-group.required .chip:not(.active) { opacity: 0.7; }
+
+    /* Unit toggle */
+    .unit-toggle {
+      display: flex;
+      background: var(--bg-input);
+      border: 1.5px solid var(--border-0);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+    .unit-toggle-btn {
+      flex: 1; height: 40px;
+      background: none; border: none;
+      color: var(--text-2);
+      font-family: var(--font-title);
+      font-weight: 700; font-size: 14px;
+      cursor: pointer; transition: all 0.15s;
+      letter-spacing: 1px;
+    }
+    .unit-toggle-btn.active {
+      background: var(--amber);
+      color: #000;
+    }
+
+    /* ================================================================
+       CARDS & PANELS
+    ================================================================ */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-1);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+    }
+    .card-tight { padding: 12px 14px; }
+    .card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .divider { height: 1px; background: var(--border-1); margin: 16px 0; }
+    .divider-dashed { border-top: 1px dashed var(--border-0); margin: 12px 0; }
+
+    /* ================================================================
+       PRICE BREAKDOWN
+    ================================================================ */
+    .price-row {
+      display: flex; align-items: baseline; justify-content: space-between;
+      padding: 6px 0;
+    }
+    .price-row-label { font-size: 14px; color: var(--text-1); }
+    .price-row-value {
+      font-family: var(--font-title);
+      font-weight: 700;
+      font-size: 18px;
+      color: var(--text-0);
+    }
+    .price-total-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 0 0;
+      border-top: 1px solid var(--border-0);
+      margin-top: 8px;
+    }
+    .price-total-label {
+      font-family: var(--font-title);
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--text-0);
+    }
+    .price-total-value {
+      font-family: var(--font-title);
+      font-weight: 800;
+      font-size: 32px;
+      color: var(--amber);
+      letter-spacing: -0.5px;
+    }
+
+    /* ================================================================
+       PANE LIST ITEMS
+    ================================================================ */
+    .pane-item {
+      background: var(--bg-2);
+      border: 1px solid var(--border-0);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .pane-item-num {
+      width: 32px; height: 32px;
+      background: var(--amber-bg);
+      border: 1px solid var(--amber);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-title);
+      font-weight: 800;
+      font-size: 14px;
+      color: var(--amber);
+      flex-shrink: 0;
+    }
+    .pane-item-info { flex: 1; min-width: 0; }
+    .pane-item-type {
+      font-family: var(--font-semi);
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--text-0);
+    }
+    .pane-item-dims {
+      font-size: 13px;
+      color: var(--text-2);
+      margin-top: 2px;
+    }
+    .pane-item-price {
+      font-family: var(--font-title);
+      font-weight: 800;
+      font-size: 22px;
+      color: var(--text-0);
+      flex-shrink: 0;
+    }
+    .pane-item-remove {
+      width: 36px; height: 36px;
+      background: var(--red-bg);
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      color: var(--red);
+      font-size: 18px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.15s;
+    }
+    .pane-item-remove:active { border-color: var(--red); transform: scale(0.9); }
+
+    /* ================================================================
+       STATUS BADGES
+    ================================================================ */
+    .badge {
+      display: inline-flex; align-items: center;
+      padding: 3px 10px;
+      border-radius: 100px;
+      font-family: var(--font-title);
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .badge-sent { background: var(--green-bg); color: var(--green); border: 1px solid var(--green); }
+    .badge-draft { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue); }
+    .badge-flagged { background: var(--orange-bg); color: var(--orange); border: 1px solid var(--orange); }
+    .badge-shown { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber); }
+
+    /* ================================================================
+       HISTORY LIST
+    ================================================================ */
+    .history-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border-1);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .history-item:active { border-color: var(--amber); background: var(--bg-2); }
+    .history-icon {
+      width: 40px; height: 40px;
+      background: var(--bg-3);
+      border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+    .history-info { flex: 1; min-width: 0; }
+    .history-customer {
+      font-family: var(--font-semi);
+      font-weight: 700;
+      font-size: 16px;
+      color: var(--text-0);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .history-meta { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+    .history-price {
+      font-family: var(--font-title);
+      font-weight: 800;
+      font-size: 22px;
+      color: var(--amber);
+      flex-shrink: 0;
+      text-align: right;
+    }
+    .history-price-sub { font-size: 12px; color: var(--text-2); text-align: right; }
+
+    /* ================================================================
+       BOTTOM ACTION BAR
+    ================================================================ */
+    .action-bar {
+      position: sticky;
+      bottom: 0;
+      background: var(--bg-1);
+      border-top: 1px solid var(--border-0);
+      padding: 12px 16px;
+      padding-bottom: max(12px, env(safe-area-inset-bottom));
+      display: flex;
+      gap: 10px;
+      z-index: 50;
+    }
+
+    /* ================================================================
+       RUNNING TOTAL BAR
+    ================================================================ */
+    .total-bar {
+      background: var(--bg-2);
+      border-top: 1px solid var(--border-0);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .total-bar-label { font-size: 13px; color: var(--text-2); font-family: var(--font-title); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+    .total-bar-price { font-family: var(--font-title); font-weight: 800; font-size: 28px; color: var(--amber); }
+    .total-bar-meta { font-size: 12px; color: var(--text-3); }
+
+    /* ================================================================
+       SCROLL AREA
+    ================================================================ */
+    .scroll-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .scroll-content-pb { padding-bottom: 32px; }
+
+    /* ================================================================
+       EMPTY STATE
+    ================================================================ */
+    .empty-state {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; text-align: center;
+      padding: 48px 32px;
+      gap: 12px;
+    }
+    .empty-icon { font-size: 48px; opacity: 0.5; }
+    .empty-title {
+      font-family: var(--font-title); font-weight: 700;
+      font-size: 20px; color: var(--text-1);
+    }
+    .empty-sub { font-size: 14px; color: var(--text-2); max-width: 240px; }
+
+    /* ================================================================
+       ALERTS
+    ================================================================ */
+    .alert {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 12px 14px;
+      border-radius: var(--radius-md);
+      font-size: 14px; line-height: 1.5;
+      margin-bottom: 12px;
+    }
+    .alert-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+    .alert-warning { background: var(--orange-bg); border: 1px solid var(--orange); color: var(--orange); }
+    .alert-info { background: var(--blue-bg); border: 1px solid var(--blue); color: var(--blue); }
+    .alert-danger { background: var(--red-bg); border: 1px solid var(--red); color: var(--red); }
+    .alert-success { background: var(--green-bg); border: 1px solid var(--green); color: var(--green); }
+
+    /* ================================================================
+       MODAL / OVERLAY
+    ================================================================ */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 200;
+      display: flex; align-items: flex-end;
+      animation: fadeInOverlay 0.2s ease;
+    }
+    @keyframes fadeInOverlay { from { opacity:0 } to { opacity:1 } }
+    .modal-sheet {
+      width: 100%;
+      background: var(--bg-2);
+      border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+      padding: 24px 20px;
+      padding-bottom: max(24px, env(safe-area-inset-bottom));
+      animation: slideUp 0.25s ease;
+    }
+    @keyframes slideUp { from { transform: translateY(60px); opacity:0 } to { transform: translateY(0); opacity:1 } }
+    .modal-handle {
+      width: 40px; height: 4px;
+      background: var(--border-0);
+      border-radius: 2px;
+      margin: 0 auto 20px;
+    }
+
+    /* ================================================================
+       TABS
+    ================================================================ */
+    .tabs {
+      display: flex;
+      background: var(--bg-1);
+      border-bottom: 1px solid var(--border-1);
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tab-btn {
+      flex-shrink: 0;
+      padding: 14px 20px;
+      background: none; border: none;
+      font-family: var(--font-semi);
+      font-weight: 600; font-size: 15px;
+      color: var(--text-2);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .tab-btn.active {
+      color: var(--amber);
+      border-bottom-color: var(--amber);
+    }
+
+    /* ================================================================
+       ADMIN TABLE
+    ================================================================ */
+    .admin-table { width: 100%; border-collapse: collapse; }
+    .admin-table th {
+      text-align: left;
+      padding: 10px 12px;
+      font-family: var(--font-title);
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--text-2);
+      border-bottom: 1px solid var(--border-0);
+    }
+    .admin-table td {
+      padding: 12px;
+      font-size: 15px;
+      color: var(--text-0);
+      border-bottom: 1px solid var(--border-1);
+    }
+    .admin-table tr:last-child td { border-bottom: none; }
+    .admin-table tr:hover td { background: var(--bg-3); }
+
+    /* ================================================================
+       LOGIN SCREEN
+    ================================================================ */
+    .login-screen {
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-0);
+      padding: 48px 24px 32px;
+    }
+    .login-logo-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding-bottom: 32px;
+    }
+    .login-logo-mark {
+      width: 72px; height: 72px;
+      background: var(--amber-bg);
+      border: 2px solid var(--amber);
+      border-radius: var(--radius-lg);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+    .login-brand {
+      font-family: var(--font-title);
+      font-weight: 800;
+      font-size: 38px;
+      letter-spacing: 2px;
+      color: var(--amber);
+      text-transform: uppercase;
+    }
+    .login-tagline {
+      font-family: var(--font-title);
+      font-weight: 500;
+      font-size: 16px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--text-2);
+    }
+    .login-form {
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .login-demo-hint {
+      background: var(--bg-2);
+      border: 1px solid var(--border-0);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      font-size: 13px;
+      color: var(--text-2);
+    }
+    .login-demo-hint strong { color: var(--amber); font-weight: 600; }
+    .login-error {
+      color: var(--red);
+      font-size: 14px;
+      text-align: center;
+      min-height: 20px;
+    }
+
+    /* ================================================================
+       HOME SCREEN
+    ================================================================ */
+    .home-hero {
+      background: linear-gradient(135deg, var(--bg-2) 0%, var(--bg-1) 100%);
+      border-bottom: 1px solid var(--border-1);
+      padding: 24px 20px 20px;
+    }
+    .home-greeting {
+      font-family: var(--font-title);
+      font-weight: 600;
+      font-size: 15px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--text-2);
+      margin-bottom: 4px;
+    }
+    .home-name {
+      font-family: var(--font-title);
+      font-weight: 800;
+      font-size: 30px;
+      color: var(--text-0);
+    }
+    .home-new-quote-btn {
+      margin-top: 20px;
+      width: 100%;
+      height: 72px;
+      background: var(--amber);
+      border: none;
+      border-radius: var(--radius-lg);
+      display: flex; align-items: center; justify-content: center; gap: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .home-new-quote-btn:active { background: var(--amber-dim); transform: scale(0.98); }
+    .home-new-quote-text {
+      font-family: var(--font-title);
+      font-weight: 800;
+      font-size: 24px;
+      color: #000;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    /* ================================================================
+       CUSTOMER VIEW (PRESENTATION MODE)
+    ================================================================ */
+    .customer-view {
+      position: fixed; inset: 0;
+      background: #fff;
+      z-index: 300;
+      overflow-y: auto;
+      padding: 32px 24px;
+      color: #1a1a2e;
+      animation: fadeIn 0.2s ease;
+    }
+    .cv-logo { font-family: var(--font-title); font-weight: 800; font-size: 28px; color: #F59E0B; text-transform: uppercase; margin-bottom: 4px; }
+    .cv-subtitle { font-size: 13px; color: #666; margin-bottom: 24px; }
+    .cv-divider { height: 2px; background: #eee; margin: 20px 0; }
+    .cv-label { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: #888; font-weight: 600; margin-bottom: 4px; }
+    .cv-value { font-size: 17px; font-weight: 600; color: #1a1a2e; margin-bottom: 16px; }
+    .cv-line-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 15px; }
+    .cv-line-label { color: #555; }
+    .cv-line-value { font-weight: 600; color: #1a1a2e; }
+    .cv-total { display: flex; justify-content: space-between; padding: 16px 0; margin-top: 8px; }
+    .cv-total-label { font-size: 20px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; }
+    .cv-total-value { font-size: 36px; font-weight: 800; color: #F59E0B; }
+    .cv-disclaimer { font-size: 11px; color: #999; line-height: 1.6; margin-top: 24px; padding-top: 16px; border-top: 1px solid #eee; }
+    .cv-close {
+      position: fixed; top: 16px; right: 16px;
+      width: 44px; height: 44px;
+      background: #1a1a2e; color: #fff;
+      border: none; border-radius: 50%;
+      font-size: 20px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    /* ================================================================
+       GLASS TYPE SELECTOR GRID
+    ================================================================ */
+    .glass-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .glass-option {
+      background: var(--bg-3);
+      border: 2px solid var(--border-0);
+      border-radius: var(--radius-md);
+      padding: 14px 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .glass-option:active { transform: scale(0.97); }
+    .glass-option.active {
+      background: var(--amber-bg);
+      border-color: var(--amber);
+    }
+    .glass-option-name {
+      font-family: var(--font-semi);
+      font-weight: 700; font-size: 15px;
+      color: var(--text-0);
+    }
+    .glass-option.active .glass-option-name { color: var(--amber); }
+    .glass-option-price { font-size: 12px; color: var(--text-2); }
+
+    /* ================================================================
+       STEP INDICATOR
+    ================================================================ */
+    .step-indicator {
+      display: flex; align-items: center; gap: 0;
+      padding: 12px 20px;
+      background: var(--bg-1);
+      border-bottom: 1px solid var(--border-1);
+    }
+    .step-dot {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-title); font-weight: 800; font-size: 13px;
+      flex-shrink: 0;
+      transition: all 0.2s;
+    }
+    .step-dot.done { background: var(--amber); color: #000; }
+    .step-dot.active { background: var(--amber-bg); border: 2px solid var(--amber); color: var(--amber); }
+    .step-dot.pending { background: var(--bg-3); border: 2px solid var(--border-0); color: var(--text-3); }
+    .step-line { flex: 1; height: 2px; }
+    .step-line.done { background: var(--amber); }
+    .step-line.pending { background: var(--border-0); }
+    .step-label { font-size: 10px; color: var(--text-2); text-align: center; margin-top: 4px; letter-spacing: 0.5px; font-family: var(--font-title); font-weight: 600; text-transform: uppercase; }
+
+    /* ================================================================
+       MISC
+    ================================================================ */
+    .text-amber { color: var(--amber); }
+    .text-green { color: var(--green); }
+    .text-red { color: var(--red); }
+    .text-muted { color: var(--text-2); }
+    .text-sm { font-size: 14px; }
+    .fw-bold { font-weight: 700; }
+    .mt-8 { margin-top: 8px; }
+    .mt-12 { margin-top: 12px; }
+    .mt-16 { margin-top: 16px; }
+    .mb-8 { margin-bottom: 8px; }
+    .mb-12 { margin-bottom: 12px; }
+    .mb-16 { margin-bottom: 16px; }
+    .flex-between { display: flex; align-items: center; justify-content: space-between; }
+    .flex-center { display: flex; align-items: center; justify-content: center; }
+    .gap-8 { gap: 8px; }
+    .gap-12 { gap: 12px; }
+    .hidden { display: none !important; }
+
+    /* Success screen */
+    .success-screen {
+      flex: 1;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 32px 24px;
+      text-align: center;
+      gap: 16px;
+    }
+    .success-icon {
+      width: 80px; height: 80px;
+      background: var(--green-bg);
+      border: 2px solid var(--green);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 36px;
+    }
+    .success-title { font-family: var(--font-title); font-weight: 800; font-size: 32px; color: var(--text-0); }
+    .success-sub { font-size: 16px; color: var(--text-1); max-width: 280px; }
+    .success-detail {
+      background: var(--bg-card);
+      border: 1px solid var(--border-1);
+      border-radius: var(--radius-lg);
+      padding: 16px 20px;
+      width: 100%; max-width: 360px;
+      text-align: left;
+    }
+
+    /* search input */
+    .search-input-wrap {
+      position: relative;
+    }
+    .search-input-wrap .search-icon {
+      position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+      color: var(--text-2); font-size: 16px; pointer-events: none;
+    }
+    .search-input {
+      height: 48px;
+      width: 100%;
+      padding: 0 16px 0 42px;
+      background: var(--bg-input);
+      border: 1.5px solid var(--border-0);
+      border-radius: var(--radius-md);
+      color: var(--text-0);
+      font-size: 16px;
+    }
+    .search-input:focus { outline: none; border-color: var(--amber); }
+
+    /* Toggle switch */
+    .toggle-wrap { display: flex; align-items: center; justify-content: space-between; }
+    .toggle-label { font-size: 15px; color: var(--text-1); }
+    .toggle-switch {
+      position: relative;
+      width: 52px; height: 28px;
+    }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: var(--bg-3);
+      border: 1px solid var(--border-0);
+      border-radius: 100px;
+      transition: 0.2s;
+    }
+    .toggle-slider:before {
+      content: '';
+      position: absolute;
+      width: 20px; height: 20px;
+      left: 3px; top: 3px;
+      background: var(--text-2);
+      border-radius: 50%;
+      transition: 0.2s;
+    }
+    .toggle-switch input:checked + .toggle-slider { background: var(--amber-bg); border-color: var(--amber); }
+    .toggle-switch input:checked + .toggle-slider:before { transform: translateX(24px); background: var(--amber); }
+
+    /* Inline edit for admin */
+    .inline-edit-input {
+      height: 36px; padding: 0 10px;
+      background: var(--bg-input);
+      border: 1.5px solid var(--amber);
+      border-radius: var(--radius-sm);
+      color: var(--text-0);
+      font-size: 15px;
+      width: 100px;
+    }
+    .inline-edit-input:focus { outline: none; }
+
+    /* Send modal options */
+    .send-option {
+      display: flex; align-items: center; gap: 14px;
+      padding: 16px;
+      background: var(--bg-3);
+      border: 1.5px solid var(--border-0);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-bottom: 10px;
+    }
+    .send-option:active { border-color: var(--amber); background: var(--amber-bg); }
+    .send-option-icon {
+      width: 44px; height: 44px;
+      background: var(--bg-2);
+      border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px;
+    }
+    .send-option-text { flex: 1; }
+    .send-option-title { font-family: var(--font-semi); font-weight: 700; font-size: 16px; }
+    .send-option-sub { font-size: 13px; color: var(--text-2); }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ================================================================
+   CONSTANTS & DEFAULT CATALOG DATA
+   (placeholder rates — Operations team to confirm before production)
+================================================================ */
+const APP_VERSION = '1.0.0-prototype';
+const MAX_PANE_SIZE_IN = 120; // inches — trigger large-pane warning
+
+const DEFAULT_CATALOG = {
+  version: 1,
+  lastUpdated: new Date().toISOString(),
+  glassTypes: [
+    { id: 'single',     label: 'Single Pane',        costPerSqft: 7.50,  active: true },
+    { id: 'double_igu', label: 'Double Pane IGU',     costPerSqft: 15.00, active: true },
+    { id: 'tempered',   label: 'Tempered',            costPerSqft: 12.50, active: true },
+    { id: 'laminated',  label: 'Laminated',           costPerSqft: 19.00, active: true },
+    { id: 'lowe_double',label: 'Low-E (Double Pane)', costPerSqft: 21.50, active: true },
+    { id: 'lowe_single',label: 'Low-E (Single Pane)', costPerSqft: 11.00, active: true },
+  ],
+  laborRate: {
+    baseRatePerPane: 85.00,
+    effectiveDate: new Date().toISOString(),
+  },
+  modifiers: {
+    floorLevel: [
+      { id: 'ground', label: 'Ground',  sublabel: 'Floor 1', multiplier: 1.00 },
+      { id: 'second', label: '2nd Fl.',  sublabel: 'Floor 2', multiplier: 1.15 },
+      { id: 'third',  label: '3rd+ Fl.', sublabel: 'Floor 3+', multiplier: 1.30 },
+    ],
+    accessDifficulty: [
+      { id: 'standard',   label: 'Standard',   sublabel: 'Normal access',    multiplier: 1.00 },
+      { id: 'ladder',     label: 'Ladder Req.', sublabel: 'Ladder required',  multiplier: 1.10 },
+      { id: 'restricted', label: 'Restricted', sublabel: 'Difficult access',  multiplier: 1.20 },
+    ],
+  },
+  materialsRate: {
+    costPerLinearInch: 0.065,
+    effectiveDate: new Date().toISOString(),
+  },
+};
+
+const DEFAULT_USERS = [
+  { id: 'tech_001', username: 'tech1', password: 'demo', name: 'Mike Torres', role: 'tech' },
+  { id: 'tech_002', username: 'tech2', password: 'demo', name: 'Sarah Chen', role: 'tech' },
+  { id: 'admin_001', username: 'admin', password: 'demo', name: 'Office Admin', role: 'admin' },
+];
+
+const SAMPLE_QUOTES = [
+  {
+    id: 'q_sample_1',
+    techId: 'tech_001',
+    techName: 'Mike Torres',
+    customerName: 'R. Johnson',
+    customerContact: '720-555-0142',
+    contactType: 'phone',
+    jobDate: new Date(Date.now() - 86400000 * 2).toISOString(),
+    status: 'sent',
+    floorLevel: 'ground',
+    accessDifficulty: 'standard',
+    panes: [
+      { id: 'p1', glassTypeId: 'double_igu', width: 36, height: 48, unit: 'in' }
+    ],
+    totalProduct: 45.00, totalLabor: 85.00, totalMaterials: 10.92,
+    grandTotal: 140.92,
+    catalogVersion: 1,
+    createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
+  },
+  {
+    id: 'q_sample_2',
+    techId: 'tech_001',
+    techName: 'Mike Torres',
+    customerName: 'The Williams Family',
+    customerContact: 'williams@email.com',
+    contactType: 'email',
+    jobDate: new Date(Date.now() - 86400000 * 5).toISOString(),
+    status: 'sent',
+    floorLevel: 'second',
+    accessDifficulty: 'ladder',
+    panes: [
+      { id: 'p1', glassTypeId: 'tempered', width: 24, height: 36, unit: 'in' },
+      { id: 'p2', glassTypeId: 'tempered', width: 24, height: 36, unit: 'in' },
+    ],
+    totalProduct: 75.00, totalLabor: 215.58, totalMaterials: 15.60,
+    grandTotal: 306.18,
+    catalogVersion: 1,
+    createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
+  },
+];
+
+/* ================================================================
+   STORAGE LAYER
+================================================================ */
+function loadState() {
+  try {
+    const s = localStorage.getItem('fg_state');
+    return s ? JSON.parse(s) : null;
+  } catch { return null; }
+}
+
+function saveState(state) {
+  try {
+    localStorage.setItem('fg_state', JSON.stringify(state));
+  } catch (e) { console.warn('Storage write failed', e); }
+}
+
+function initState() {
+  const saved = loadState();
+  if (saved) return saved;
+  return {
+    catalog: DEFAULT_CATALOG,
+    users: DEFAULT_USERS,
+    quotes: SAMPLE_QUOTES,
+    lastSync: new Date().toISOString(),
+  };
+}
+
+/* ================================================================
+   APP STATE
+================================================================ */
+const appData = initState();
+
+const app = {
+  route: 'login',
+  routeParams: {},
+  currentUser: null,
+  isOnline: navigator.onLine,
+  draft: null,       // current in-progress quote
+  editMode: null,    // for admin panel edits
+  activeTab: 0,
+  historySearch: '',
+  sendModal: false,
+  customerViewOpen: false,
+  customerViewQuoteId: null,
+};
+
+/* ================================================================
+   PRICING ENGINE
+================================================================ */
+function calcPane(width_in, height_in, glassTypeId, floorModId, accessModId, catalog) {
+  const gt = catalog.glassTypes.find(g => g.id === glassTypeId);
+  if (!gt) return null;
+  const sqft = (width_in * height_in) / 144;
+  const productCost = sqft * gt.costPerSqft;
+  const perimeter = 2 * (width_in + height_in);
+  const materialsCost = perimeter * catalog.materialsRate.costPerLinearInch;
+  const floorMod = catalog.modifiers.floorLevel.find(m => m.id === floorModId) || catalog.modifiers.floorLevel[0];
+  const accessMod = catalog.modifiers.accessDifficulty.find(m => m.id === accessModId) || catalog.modifiers.accessDifficulty[0];
+  const laborCost = catalog.laborRate.baseRatePerPane * floorMod.multiplier * accessMod.multiplier;
+  return {
+    sqft: +sqft.toFixed(4),
+    productCost: +productCost.toFixed(2),
+    materialsCost: +materialsCost.toFixed(2),
+    laborCost: +laborCost.toFixed(2),
+    lineTotal: +(productCost + materialsCost + laborCost).toFixed(2),
+  };
+}
+
+function calcJob(panes, floorModId, accessModId, catalog) {
+  let totalProduct = 0, totalLabor = 0, totalMaterials = 0;
+  const lineItems = panes.map(p => {
+    const w = p.unit === 'cm' ? p.width * 0.393701 : p.width;
+    const h = p.unit === 'cm' ? p.height * 0.393701 : p.height;
+    const r = calcPane(w, h, p.glassTypeId, floorModId, accessModId, catalog);
+    if (!r) return null;
+    totalProduct += r.productCost;
+    totalLabor += r.laborCost;
+    totalMaterials += r.materialsCost;
+    return { ...p, ...r };
+  });
+  const grandTotal = totalProduct + totalLabor + totalMaterials;
+  return {
+    lineItems,
+    totalProduct: +totalProduct.toFixed(2),
+    totalLabor: +totalLabor.toFixed(2),
+    totalMaterials: +totalMaterials.toFixed(2),
+    grandTotal: +grandTotal.toFixed(2),
+  };
+}
+
+function inToCm(v) { return (v / 0.393701).toFixed(1); }
+function toIn(v, unit) { return unit === 'cm' ? v * 0.393701 : v; }
+
+/* ================================================================
+   ROUTING
+================================================================ */
+function navigate(route, params = {}) {
+  app.route = route;
+  app.routeParams = params;
+  app.sendModal = false;
+  render();
+  window.scrollTo(0, 0);
+}
+
+/* ================================================================
+   HELPERS
+================================================================ */
+function fmt(n) {
+  return '$' + (+n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+function fmtDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+function genId() {
+  return 'q_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+function genPaneId() {
+  return 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+}
+function getGlassLabel(id) {
+  const g = appData.catalog.glassTypes.find(x => x.id === id);
+  return g ? g.label : id;
+}
+function getModLabel(type, id) {
+  const arr = type === 'floor' ? appData.catalog.modifiers.floorLevel : appData.catalog.modifiers.accessDifficulty;
+  const m = arr.find(x => x.id === id);
+  return m ? m.label : id;
+}
+function isLargePaneWarning(w_in, h_in) {
+  return w_in > MAX_PANE_SIZE_IN || h_in > MAX_PANE_SIZE_IN;
+}
+function getCatalogWarning() {
+  if (!app.isOnline) {
+    const last = new Date(appData.lastSync);
+    const days = Math.floor((Date.now() - last) / 86400000);
+    if (days >= 7) return `Pricing may be outdated (last synced ${days} days ago) — verify when connected.`;
+  }
+  return null;
+}
+
+/* ================================================================
+   NEW QUOTE STATE HELPERS
+================================================================ */
+function newDraft() {
+  return {
+    id: genId(),
+    customerName: '',
+    customerContact: '',
+    contactType: 'phone',
+    jobDate: new Date().toISOString(),
+    floorLevel: 'ground',
+    accessDifficulty: 'standard',
+    panes: [],
+    currentPane: {
+      glassTypeId: null,
+      width: '',
+      height: '',
+      unit: 'in',
+    },
+    step: 1, // 1=pane input, 2=pane list review, 3=quote summary
+    catalogVersion: appData.catalog.version,
+    status: 'draft',
+  };
+}
+
+function draftJobCalc() {
+  if (!app.draft || app.draft.panes.length === 0) return null;
+  return calcJob(app.draft.panes, app.draft.floorLevel, app.draft.accessDifficulty, appData.catalog);
+}
+
+function draftCurrentPaneCalc() {
+  const cp = app.draft?.currentPane;
+  if (!cp || !cp.glassTypeId || !cp.width || !cp.height) return null;
+  const w = toIn(parseFloat(cp.width), cp.unit);
+  const h = toIn(parseFloat(cp.height), cp.unit);
+  if (!w || !h || w <= 0 || h <= 0) return null;
+  return calcPane(w, h, cp.glassTypeId, app.draft.floorLevel, app.draft.accessDifficulty, appData.catalog);
+}
+
+/* ================================================================
+   RENDER ENGINE
+================================================================ */
+function render() {
+  const el = document.getElementById('app');
+  el.innerHTML = '';
+
+  // Customer view overlay
+  if (app.customerViewOpen) {
+    el.innerHTML = renderCustomerView(app.customerViewQuoteId);
+    attachCustomerViewEvents();
+    return;
+  }
+
+  switch (app.route) {
+    case 'login':     el.innerHTML = renderLogin(); break;
+    case 'home':      el.innerHTML = renderHome(); break;
+    case 'new-quote': el.innerHTML = renderNewQuote(); break;
+    case 'review':    el.innerHTML = renderReview(); break;
+    case 'sent':      el.innerHTML = renderSent(); break;
+    case 'history':   el.innerHTML = renderHistory(); break;
+    case 'admin':     el.innerHTML = renderAdmin(); break;
+    default:          el.innerHTML = renderLogin();
+  }
+  attachEvents();
+}
+
+/* ================================================================
+   RENDER: CONNECTION BADGE
+================================================================ */
+function connBadge() {
+  return app.isOnline
+    ? `<span class="online-badge">● Online</span>`
+    : `<span class="offline-badge">⚠ Offline</span>`;
+}
+
+/* ================================================================
+   SCREEN: LOGIN
+================================================================ */
+function renderLogin() {
+  return `
+<div class="login-screen screen">
+  <div class="login-logo-area">
+    <div class="login-logo-mark">🪟</div>
+    <div class="login-brand">FastGlass</div>
+    <div class="login-tagline">Field Pricing Tool</div>
+  </div>
+
+  <div class="login-form">
+    <div class="login-demo-hint">
+      <strong>Demo Credentials</strong><br>
+      Technician: <strong>tech1 / demo</strong><br>
+      Admin: <strong>admin / demo</strong>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Username</label>
+      <input class="form-input" id="login-user" type="text" autocomplete="username"
+        autocapitalize="none" placeholder="Enter username" value="" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Password</label>
+      <input class="form-input" id="login-pass" type="password" autocomplete="current-password"
+        placeholder="Enter password" />
+    </div>
+    <p class="login-error" id="login-error"></p>
+    <button class="btn btn-primary btn-full" id="login-btn">Sign In →</button>
+    <div style="text-align:center; padding-top:8px;">
+      ${connBadge()}
+    </div>
+    <p style="text-align:center; font-size:12px; color:var(--text-3); margin-top:16px;">
+      FastGlass Field Pricer v${APP_VERSION}<br>
+      <span style="color:var(--orange); font-size:11px;">⚠ Prototype — catalog rates are placeholder values</span>
+    </p>
+  </div>
+</div>`;
+}
+
+/* ================================================================
+   SCREEN: HOME
+================================================================ */
+function renderHome() {
+  const u = app.currentUser;
+  const myQuotes = appData.quotes
+    .filter(q => q.techId === u.id)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, 3);
+
+  const catalogWarn = getCatalogWarning();
+
+  return `
+<div class="screen" style="background:var(--bg-0);">
+  <div class="app-header">
+    <div class="header-logo">FastGlass</div>
+    <div class="header-right">
+      ${connBadge()}
+      ${u.role === 'admin' ? `<button class="icon-btn" id="home-admin-btn" title="Admin Panel">⚙️</button>` : ''}
+      <button class="icon-btn" id="home-logout-btn" title="Sign Out">⎋</button>
+    </div>
+  </div>
+
+  <div class="home-hero">
+    <div class="home-greeting">Welcome back,</div>
+    <div class="home-name">${u.name}</div>
+    ${catalogWarn ? `<div class="alert alert-warning mt-12"><span class="alert-icon">⚠</span>${catalogWarn}</div>` : ''}
+    <button class="home-new-quote-btn" id="start-new-quote">
+      <span style="font-size:24px;">+</span>
+      <span class="home-new-quote-text">New Quote</span>
+    </button>
+  </div>
+
+  <div class="scroll-content scroll-content-pb">
+    <div class="flex-between mb-12 mt-4">
+      <span class="section-label">Recent Quotes</span>
+      ${myQuotes.length > 0 ? `<button class="btn btn-ghost btn-sm" id="view-all-history">View All</button>` : ''}
+    </div>
+
+    ${myQuotes.length === 0 ? `
+      <div class="empty-state" style="padding: 32px 24px;">
+        <div class="empty-icon">📋</div>
+        <div class="empty-title">No quotes yet</div>
+        <div class="empty-sub">Tap "New Quote" to generate your first estimate.</div>
+      </div>
+    ` : myQuotes.map(q => renderHistoryItem(q)).join('')}
+
+    ${u.role === 'admin' ? `
+      <div class="divider"></div>
+      <button class="btn btn-secondary btn-full" id="home-admin-btn2" style="margin-bottom:8px;">
+        ⚙️ Admin Panel
+      </button>
+    ` : ''}
+  </div>
+</div>`;
+}
+
+/* ================================================================
+   SCREEN: NEW QUOTE
+================================================================ */
+function renderNewQuote() {
+  const d = app.draft;
+  if (!d) return '';
+  if (d.step === 1) return renderNewQuoteStep1();
+  if (d.step === 2) return renderNewQuoteStep2();
+  return renderReview();
+}
+
+function stepIndicator(active) {
+  const steps = ['Pane Details', 'Pane List', 'Review & Send'];
+  return `
+  <div class="step-indicator">
+    ${steps.map((s, i) => `
+      <div style="display:flex;flex-direction:column;align-items:center;">
+        <div class="step-dot ${i < active ? 'done' : i === active ? 'active' : 'pending'}">${i < active ? '✓' : i+1}</div>
+        <div class="step-label" style="color:${i === active ? 'var(--amber)' : 'var(--text-3)'}">${s}</div>
+      </div>
+      ${i < steps.length - 1 ? `<div class="step-line flex:1 ${i < active ? 'done' : 'pending'}" style="flex:1;margin:0 4px;margin-bottom:18px;"></div>` : ''}
+    `).join('')}
+  </div>`;
+}
+
+function renderNewQuoteStep1() {
+  const d = app.draft;
+  const cp = d.currentPane;
+  const paneCalc = draftCurrentPaneCalc();
+  const jobCalc = draftJobCalc();
+  const largePaneWarn = cp.width && cp.height && isLargePaneWarning(
+    toIn(parseFloat(cp.width), cp.unit), toIn(parseFloat(cp.height), cp.unit)
+  );
+  const catalogWarn = getCatalogWarning();
+  const canAddPane = cp.glassTypeId && cp.width && cp.height && parseFloat(cp.width) > 0 && parseFloat(cp.height) > 0;
+  const canReview = d.panes.length > 0;
+
+  return `
+<div class="screen" style="background:var(--bg-0);">
+  <div class="app-header">
+    <button class="header-back-btn" id="back-home">←</button>
+    <div class="header-title">New Quote</div>
+    <div class="header-right">${connBadge()}</div>
+  </div>
+  ${stepIndicator(0)}
+
+  <div class="scroll-content" style="padding-bottom:160px;">
+    ${catalogWarn ? `<div class="alert alert-warning"><span class="alert-icon">⚠</span>${catalogWarn}</div>` : ''}
+
+    <!-- Customer Info -->
+    <div class="card mb-16">
+      <div class="section-label mb-12">Customer (Optional at this step)</div>
+      <div class="form-group mb-12">
+        <label class="form-label">Customer Name</label>
+        <input class="form-input" id="cust-name" placeholder="Full name or company" value="${d.customerName}" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Phone / Email</label>
+          <input class="form-input" id="cust-contact" placeholder="Contact info" value="${d.customerContact}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Type</label>
+          <select class="form-input" id="cust-contact-type">
+            <option value="phone" ${d.contactType === 'phone' ? 'selected' : ''}>📱 Phone</option>
+            <option value="email" ${d.contactType === 'email' ? 'selected' : ''}>✉ Email</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Glass Type -->
+    <div class="section-label mb-8">Glass Type</div>
+    <div class="glass-grid mb-16">
+      ${appData.catalog.glassTypes.filter(g => g.active).map(g => `
+        <div class="glass-option ${cp.glassTypeId === g.id ? 'active' : ''}" data-glass="${g.id}">
+          <div class="glass-option-name">${g.label}</div>
+          <div class="glass-option-price">${fmt(g.costPerSqft)}/sqft</div>
+        </div>
+      `).join('')}
+    </div>
+
+    <!-- Dimensions -->
+    <div class="section-label mb-8">Dimensions</div>
+    <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+      <div class="unit-toggle" style="width:120px;">
+        <button class="unit-toggle-btn ${cp.unit === 'in' ? 'active' : ''}" id="unit-in">IN</button>
+        <button class="unit-toggle-btn ${cp.unit === 'cm' ? 'active' : ''}" id="unit-cm">CM</button>
+      </div>
+    </div>
+    <div class="form-row mb-4">
+      <div class="form-group">
+        <label class="form-label">Width (${cp.unit})</label>
+        <input class="form-input form-input-large" id="pane-width" type="number"
+          inputmode="decimal" placeholder="0" value="${cp.width}" min="1" max="300" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Height (${cp.unit})</label>
+        <input class="form-input form-input-large" id="pane-height" type="number"
+          inputmode="decimal" placeholder="0" value="${cp.height}" min="1" max="300" />
+      </div>
+    </div>
+    ${largePaneWarn ? `
+      <div class="alert alert-warning mb-12">
+        <span class="alert-icon">⚠</span>
+        Pane size exceeds standard catalog. Flag this job for office review.
+      </div>
+    ` : ''}
+
+    <!-- Modifiers -->
+    <div class="section-label mb-8 mt-16">Floor Level</div>
+    <div class="chip-group mb-16">
+      ${appData.catalog.modifiers.floorLevel.map(m => `
+        <div class="chip ${d.floorLevel === m.id ? 'active' : ''}" data-floor="${m.id}">
+          ${m.label}
+          <span style="font-size:11px;opacity:0.7;">${m.multiplier !== 1 ? '+' + Math.round((m.multiplier-1)*100) + '%' : ''}</span>
+        </div>
+      `).join('')}
+    </div>
+
+    <div class="section-label mb-8">Access Difficulty</div>
+    <div class="chip-group mb-16">
+      ${appData.catalog.modifiers.accessDifficulty.map(m => `
+        <div class="chip ${d.accessDifficulty === m.id ? 'active' : ''}" data-access="${m.id}">
+          ${m.label}
+          <span style="font-size:11px;opacity:0.7;">${m.multiplier !== 1 ? '+' + Math.round((m.multiplier-1)*100) + '%' : ''}</span>
+        </div>
+      `).join('')}
+    </div>
+
+    <!-- Pane price preview -->
+    ${paneCalc ? `
+    <div class="card" style="border-color: var(--border-0);">
+      <div class="section-label mb-8">This Pane — Preview</div>
+      <div class="price-row">
+        <span class="price-row-label">Glass (${paneCalc.sqft.toFixed(2)} sqft)</span>
+        <span class="price-row-value">${fmt(paneCalc.productCost)}</span>
+      </div>
+      <div class="price-row">
+        <span class="price-row-label">Labor</span>
+        <span class="price-row-value">${fmt(paneCalc.laborCost)}</span>
+      </div>
+      <div class="price-row">
+        <span class="price-row-label">Materials</span>
+        <span class="price-row-value">${fmt(paneCalc.materialsCost)}</span>
+      </div>
+      <div class="price-total-row">
+        <span class="price-total-label">Pane Total</span>
+        <span class="price-total-value">${fmt(paneCalc.lineTotal)}</span>
+      </div>
+    </div>
+    ` : ''}
+
+    ${d.panes.length > 0 ? `
+    <div style="margin-top:12px; padding:10px 14px; background:var(--bg-2); border-radius:var(--radius-md); display:flex; justify-content:space-between; align-items:center;">
+      <span class="text-muted text-sm">${d.panes.length} pane${d.panes.length > 1 ? 's' : ''} added</span>
+      <span style="font-family:var(--font-title); font-weight:800; font-size:20px; color:var(--amber);">
+        ${fmt(jobCalc ? jobCalc.grandTotal + (paneCalc ? paneCalc.lineTotal : 0) : 0)} est.
+      </span>
+    </div>
+    ` : ''}
+  </div>
+
+  <!-- Action Bar -->
+  <div class="action-bar" style="flex-direction:column; gap:8px;">
+    <div style="display:flex; gap:8px;">
+      <button class="btn btn-secondary" id="add-pane-btn" ${!canAddPane ? 'disabled' : ''} style="flex:1;">
+        + Add Pane ${d.panes.length > 0 ? `(${d.panes.length})` : ''}
+      </button>
+      <button class="btn btn-primary" id="review-quote-btn" ${!canReview ? 'disabled' : ''} style="flex:2;">
+        Review Quote →
+      </button>
+    </div>
+    ${!canAddPane && !canReview ? `<p style="text-align:center;font-size:13px;color:var(--text-3);">Select glass type and enter dimensions to continue</p>` : ''}
+    ${largePaneWarn ? `
+      <button class="btn btn-danger btn-full btn-sm" id="flag-large-pane">⚑ Flag for Office Review</button>
+    ` : ''}
+  </div>
+</div>`;
+}
+
+function renderNewQuoteStep2() {
+  const d = app.draft;
+  const jobCalc = draftJobCalc();
+
+  return `
+<div class="screen" style="background:var(--bg-0);">
+  <div class="app-header">
+    <button class="header-back-btn" id="back-step1">←</button>
+    <div class="header-title">Pane List</div>
+    <div class="header-right">${connBadge()}</div>
+  </div>
+  ${stepIndicator(1)}
+
+  <div class="scroll-content" style="padding-bottom:140px;">
+    <div class="flex-between mb-16">
+      <span class="section-label">${d.panes.length} Pane${d.panes.length !== 1 ? 's' : ''}</span>
+      <span style="font-size:13px;color:var(--text-2);">Floor: <strong style="color:var(--text-1);">${getModLabel('floor', d.floorLevel)}</strong> · Access: <strong style="color:var(--text-1);">${getModLabel('access', d.accessDifficulty)}</strong></span>
+    </div>
+
+    ${d.panes.map((p, i) => {
+      const w_in = toIn(parseFloat(p.width), p.unit);
+      const h_in = toIn(parseFloat(p.height), p.unit);
+      const r = calcPane(w_in, h_in, p.glassTypeId, d.floorLevel, d.accessDifficulty, appData.catalog);
+      return `
+      <div class="pane-item">
+        <div class="pane-item-num">${i+1}</div>
+        <div class="pane-item-info">
+          <div class="pane-item-type">${getGlassLabel(p.glassTypeId)}</div>
+          <div class="pane-item-dims">${p.width}" × ${p.height}" ${p.unit !== 'in' ? '(' + p.unit + ')' : ''} · ${r ? r.sqft.toFixed(2) + ' sqft' : ''}</div>
+          <div style="font-size:12px; color:var(--text-2); margin-top:2px;">
+            Glass ${r ? fmt(r.productCost) : '—'} · Labor ${r ? fmt(r.laborCost) : '—'} · Matls ${r ? fmt(r.materialsCost) : '—'}
+          </div>
+        </div>
+        <div class="pane-item-price">${r ? fmt(r.lineTotal) : '—'}</div>
+        <button class="pane-item-remove" data-remove-pane="${p.id}">✕</button>
+      </div>`;
+    }).join('')}
+
+    <button class="btn btn-ghost btn-full mt-8" id="add-another-pane-btn">
+      + Add Another Pane
+    </button>
+
+    ${d.panes.length < 20
+      ? `<p style="text-align:center; font-size:12px; color:var(--text-3); margin-top:6px;">${20 - d.panes.length} more pane${20 - d.panes.length !== 1 ? 's' : ''} can be added</p>`
+      : `<div class="alert alert-warning mt-8"><span class="alert-icon">⚠</span>Maximum of 20 panes per quote reached.</div>`
+    }
+  </div>
+
+  <div style="background:var(--bg-2);border-top:1px solid var(--border-0);padding:10px 16px;">
+    <div class="flex-between">
+      <div>
+        <div style="font-size:12px;color:var(--text-2);">RUNNING TOTAL</div>
+        <div style="font-size:11px;color:var(--text-3);">Product + Labor + Materials</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-family:var(--font-title);font-weight:800;font-size:32px;color:var(--amber);">${jobCalc ? fmt(jobCalc.grandTotal) : '$0.00'}</div>
+        <div style="font-size:11px;color:var(--text-3);">before tax</div>
+      </div>
+    </div>
+  </div>
+  <div class="action-bar">
+    <button class="btn btn-primary btn-full" id="proceed-to-review">
+      Review & Send →
+    </button>
+  </div>
+</div>`;
+}
+
+/* ================================================================
+   SCREEN: REVIEW
+================================================================ */
+function renderReview() {
+  const d = app.draft;
+  if (!d) return '';
+  const jobCalc = calcJob(d.panes, d.floorLevel, d.accessDifficulty, appData.catalog);
+
+  return `
+<div class="screen" style="background:var(--bg-0);">
+  <div class="app-header">
+    <button class="header-back-btn" id="back-to-pane-list">←</button>
+    <div class="header-title">Quote Review</div>
+    <div class="header-right">${connBadge()}</div>
+  </div>
+  ${stepIndicator(2)}
+
+  <div class="scroll-content" style="padding-bottom:160px;">
+    <!-- Customer -->
+    <div class="card mb-12">
+      <div class="section-label mb-8">Customer</div>
+      <div style="font-family:var(--font-semi);font-weight:700;font-size:18px;color:var(--text-0);">
+        ${d.customerName || '<span style="color:var(--text-3);font-weight:400;font-style:italic;">No name entered</span>'}
+      </div>
+      ${d.customerContact ? `<div style="font-size:15px;color:var(--text-1);margin-top:4px;">${d.contactType === 'email' ? '✉' : '📱'} ${d.customerContact}</div>` : ''}
+      <div style="font-size:13px;color:var(--text-2);margin-top:4px;">${fmtDate(d.jobDate)}</div>
+    </div>
+
+    <!-- Modifiers -->
+    <div class="card mb-12">
+      <div class="section-label mb-8">Job Conditions</div>
+      <div style="display:flex;gap:12px;">
+        <div style="flex:1;">
+          <div style="font-size:12px;color:var(--text-2);">FLOOR LEVEL</div>
+          <div style="font-family:var(--font-semi);font-weight:700;font-size:16px;color:var(--text-0);margin-top:2px;">
+            ${getModLabel('floor', d.floorLevel)}
+            <span style="font-size:12px;font-weight:400;color:var(--text-2);">(×${appData.catalog.modifiers.floorLevel.find(m=>m.id===d.floorLevel)?.multiplier})</span>
+          </div>
+        </div>
+        <div style="flex:1;">
+          <div style="font-size:12px;color:var(--text-2);">ACCESS</div>
+          <div style="font-family:var(--font-semi);font-weight:700;font-size:16px;color:var(--text-0);margin-top:2px;">
+            ${getModLabel('access', d.accessDifficulty)}
+            <span style="font-size:12px;font-weight:400;color:var(--text-2);">(×${appData.catalog.modifiers.accessDifficulty.find(m=>m.id===d.accessDifficulty)?.multiplier})</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Line Items -->
+    <div class="section-label mb-8">${d.panes.length} Pane${d.panes.length !== 1 ? 's' : ''} — Line Items</div>
+    ${d.panes.map((p, i) => {
+      const w_in = toIn(parseFloat(p.width), p.unit);
+      const h_in = toIn(parseFloat(p.height), p.unit);
+      const r = calcPane(w_in, h_in, p.glassTypeId, d.floorLevel, d.accessDifficulty, appData.catalog);
+      return `
+      <div class="card card-tight mb-8">
+        <div class="flex-between mb-4">
+          <span style="font-family:var(--font-semi);font-weight:700;font-size:15px;">
+            Pane ${i+1} — ${getGlassLabel(p.glassTypeId)}
+          </span>
+          <span style="font-family:var(--font-title);font-weight:800;font-size:20px;color:var(--text-0);">${r ? fmt(r.lineTotal) : '—'}</span>
+        </div>
+        <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">${p.width}" × ${p.height}" · ${r ? r.sqft.toFixed(2) : '—'} sqft</div>
+        <div class="divider-dashed"></div>
+        <div class="price-row">
+          <span class="price-row-label" style="font-size:13px;">Glass / Product</span>
+          <span class="price-row-value" style="font-size:15px;">${r ? fmt(r.productCost) : '—'}</span>
+        </div>
+        <div class="price-row">
+          <span class="price-row-label" style="font-size:13px;">Labor (with modifiers)</span>
+          <span class="price-row-value" style="font-size:15px;">${r ? fmt(r.laborCost) : '—'}</span>
+        </div>
+        <div class="price-row">
+          <span class="price-row-label" style="font-size:13px;">Materials (sealant, tape, blocks)</span>
+          <span class="price-row-value" style="font-size:15px;">${r ? fmt(r.materialsCost) : '—'}</span>
+        </div>
+      </div>`;
+    }).join('')}
+
+    <!-- Totals Summary -->
+    <div class="card mt-16" style="border-color:var(--amber);background:var(--amber-bg);">
+      <div class="section-label mb-12">Job Total Breakdown</div>
+      <div class="price-row">
+        <span class="price-row-label">Total Glass / Product</span>
+        <span class="price-row-value">${fmt(jobCalc.totalProduct)}</span>
+      </div>
+      <div class="price-row">
+        <span class="price-row-label">Total Labor</span>
+        <span class="price-row-value">${fmt(jobCalc.totalLabor)}</span>
+      </div>
+      <div class="price-row">
+        <span class="price-row-label">Total Materials</span>
+        <span class="price-row-value">${fmt(jobCalc.totalMaterials)}</span>
+      </div>
+      <div class="price-total-row">
+        <span class="price-total-label">Grand Total</span>
+        <span class="price-total-value">${fmt(jobCalc.grandTotal)}</span>
+      </div>
+      <p style="font-size:11px;color:var(--text-2);margin-top:10px;">Estimate before applicable taxes. Subject to final inspection.</p>
+    </div>
+
+    ${!app.isOnline ? `
+    <div class="alert alert-warning mt-12">
+      <span class="alert-icon">⚠</span>
+      You are offline. This quote will be queued and synced when connected.
+    </div>` : ''}
+  </div>
+
+  <!-- Action Bar -->
+  <div class="action-bar" style="flex-direction:column;gap:8px;">
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" id="show-customer-btn" style="flex:1;">
+        👁 Show Customer
+      </button>
+      <button class="btn btn-primary" id="send-quote-btn" style="flex:2;">
+        📤 Send Quote
+      </button>
+    </div>
+    <button class="btn btn-secondary btn-sm" id="flag-review-btn" style="color:var(--orange);border-color:var(--orange);">
+      ⚑ Flag for Office Review
+    </button>
+  </div>
+
+  <!-- Send Modal -->
+  ${app.sendModal ? renderSendModal(jobCalc) : ''}
+</div>`;
+}
+
+function renderSendModal(jobCalc) {
+  const d = app.draft;
+  return `
+<div class="modal-overlay" id="send-modal-overlay">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div style="font-family:var(--font-title);font-weight:800;font-size:22px;margin-bottom:4px;">Send Quote</div>
+    <div style="font-size:14px;color:var(--text-2);margin-bottom:20px;">Total: <strong style="color:var(--amber);">${fmt(jobCalc.grandTotal)}</strong></div>
+
+    ${d.customerContact ? `
+    <div class="send-option" id="send-sms-btn">
+      <div class="send-option-icon">📱</div>
+      <div class="send-option-text">
+        <div class="send-option-title">Send via ${d.contactType === 'email' ? 'Email' : 'SMS'}</div>
+        <div class="send-option-sub">${d.customerContact}</div>
+      </div>
+      <span style="color:var(--amber);">→</span>
+    </div>
+    ` : `
+    <div class="form-group mb-12">
+      <label class="form-label">Customer Contact (Required to send)</label>
+      <input class="form-input" id="modal-contact" placeholder="Phone or email" value="${d.customerContact}" />
+    </div>
+    <select class="form-input mb-12" id="modal-contact-type">
+      <option value="phone">📱 SMS</option>
+      <option value="email">✉ Email</option>
+    </select>
+    <button class="btn btn-primary btn-full" id="send-with-contact-btn">Send Quote</button>
+    `}
+
+    <div class="send-option" id="show-screen-btn">
+      <div class="send-option-icon">📱</div>
+      <div class="send-option-text">
+        <div class="send-option-title">Show on Screen</div>
+        <div class="send-option-sub">Present quote to customer on your device</div>
+      </div>
+      <span style="color:var(--amber);">→</span>
+    </div>
+
+    <button class="btn btn-secondary btn-full mt-8" id="close-send-modal">Cancel</button>
+  </div>
+</div>`;
+}
+
+/* ================================================================
+   SCREEN: QUOTE SENT
+================================================================ */
+function renderSent() {
+  const q = appData.quotes.find(x => x.id === app.routeParams.quoteId);
+  if (!q) return '';
+  return `
+<div class="screen" style="background:var(--bg-0);">
+  <div class="app-header">
+    <div class="header-logo">FastGlass</div>
+    <div class="header-right">${connBadge()}</div>
+  </div>
+
+  <div class="success-screen">
+    <div class="success-icon">✓</div>
+    <div class="success-title">Quote ${q.status === 'shown' ? 'Presented' : 'Sent'}!</div>
+    <div class="success-sub">${q.status === 'shown' ? 'The quote was shown to the customer on-screen.' : `Quote delivered to ${q.customerContact}.`}</div>
+
+    <div class="success-detail">
+      <div class="section-label mb-8">Quote Summary</div>
+      ${q.customerName ? `<div style="font-family:var(--font-semi);font-weight:700;font-size:18px;color:var(--text-0);margin-bottom:4px;">${q.customerName}</div>` : ''}
+      <div style="font-size:14px;color:var(--text-2);margin-bottom:12px;">${fmtDate(q.jobDate)} · ${q.panes.length} pane${q.panes.length !== 1 ? 's' : ''}</div>
+      <div class="price-row">
+        <span class="price-row-label">Glass / Product</span>
+        <span class="price-row-value">${fmt(q.totalProduct)}</span>
+      </div>
+      <div class="price-row">
+        <span class="price-row-label">Labor</span>
+        <span class="price-row-value">${fmt(q.totalLabor)}</span>
+      </div>
+      <div class="price-row">
+        <span class="price-row-label">Materials</span>
+        <span class="price-row-value">${fmt(q.totalMaterials)}</span>
+      </div>
+      <div class="price-total-row">
+        <span class="price-total-label">Total</span>
+        <span class="price-total-value">${fmt(q.grandTotal)}</span>
+      </div>
+    </div>
+
+    ${!app.isOnline ? `<div class="alert alert-info" style="width:100%;max-width:360px;"><span class="alert-icon">ℹ</span>Quote saved locally. Will sync when connected.</div>` : ''}
+  </div>
+
+  <div class="action-bar" style="gap:10px;">
+    <button class="btn btn-primary btn-full" id="start-new-quote-from-sent">+ New Quote</button>
+    <button class="btn btn-secondary" id="view-history-btn">History</button>
+  </div>
+</div>`;
+}
+
+/* ================================================================
+   SCREEN: HISTORY
+================================================================ */
+function renderHistory() {
+  const u = app.currentUser;
+  const search = app.historySearch.toLowerCase();
+  const allQuotes = u.role === 'admin'
+    ? appData.quotes
+    : appData.quotes.filter(q => q.techId === u.id);
+
+  const filtered = allQuotes
+    .filter(q => !search || (q.customerName || '').toLowerCase().includes(search))
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  return `
+<div class="screen" style="background:var(--bg-0);">
+  <div class="app-header">
+    <button class="header-back-btn" id="back-home-from-history">←</button>
+    <div class="header-title">Quote History</div>
+    <div class="header-right">${connBadge()}</div>
+  </div>
+
+  <div style="padding:12px 16px;background:var(--bg-1);border-bottom:1px solid var(--border-1);">
+    <div class="search-input-wrap">
+      <span class="search-icon">🔍</span>
+      <input class="search-input" id="history-search" placeholder="Search by customer name…" value="${app.historySearch}" />
+    </div>
+  </div>
+
+  <div class="scroll-content scroll-content-pb">
+    ${filtered.length === 0 ? `
+      <div class="empty-state">
+        <div class="empty-icon">📋</div>
+        <div class="empty-title">${search ? 'No results' : 'No quotes yet'}</div>
+        <div class="empty-sub">${search ? 'Try a different search.' : 'New quotes will appear here.'}</div>
+      </div>
+    ` : filtered.map(q => renderHistoryItem(q, true)).join('')}
+  </div>
+</div>`;
+}
+
+function renderHistoryItem(q, showTech = false) {
+  const statusMap = { sent: 'badge-sent', draft: 'badge-draft', flagged: 'badge-flagged', shown: 'badge-shown' };
+  const iconMap = { sent: '📤', draft: '📝', flagged: '⚑', shown: '👁' };
+  return `
+<div class="history-item" data-quote-id="${q.id}">
+  <div class="history-icon">${iconMap[q.status] || '📋'}</div>
+  <div class="history-info">
+    <div class="history-customer">${q.customerName || 'No customer name'}</div>
+    <div class="history-meta">${fmtDate(q.jobDate)} · ${q.panes.length} pane${q.panes.length !== 1 ? 's' : ''}${showTech && q.techName ? ' · ' + q.techName : ''}</div>
+    <span class="badge ${statusMap[q.status] || 'badge-draft'}" style="margin-top:4px;">${q.status}</span>
+  </div>
+  <div>
+    <div class="history-price">${fmt(q.grandTotal)}</div>
+    <div class="history-price-sub">est.</div>
+  </div>
+</div>`;
+}
+
+/* ================================================================
+   SCREEN: ADMIN
+================================================================ */
+function renderAdmin() {
+  const tabs = ['Glass Types', 'Labor & Mods', 'Materials', 'Quote Log'];
+  const t = app.activeTab;
+  return `
+<div class="screen" style="background:var(--bg-0);">
+  <div class="app-header">
+    <button class="header-back-btn" id="back-home-admin">←</button>
+    <div class="header-title">Admin Panel</div>
+    <div class="header-right">${connBadge()}</div>
+  </div>
+
+  <div class="tabs">
+    ${tabs.map((tab, i) => `
+      <button class="tab-btn ${t === i ? 'active' : ''}" data-tab="${i}">${tab}</button>
+    `).join('')}
+  </div>
+
+  <div class="scroll-content scroll-content-pb">
+    ${t === 0 ? renderAdminGlassTypes() : ''}
+    ${t === 1 ? renderAdminLabor() : ''}
+    ${t === 2 ? renderAdminMaterials() : ''}
+    ${t === 3 ? renderAdminQuoteLog() : ''}
+  </div>
+</div>`;
+}
+
+function renderAdminGlassTypes() {
+  return `
+<div>
+  <div class="alert alert-warning mb-16">
+    <span class="alert-icon">⚠</span>
+    These are placeholder rates. Operations team must confirm actual pricing before production use.
+  </div>
+  <div class="section-label mb-12">Glass Type SKUs</div>
+  <div class="card" style="padding:0;overflow:hidden;">
+    <table class="admin-table" style="width:100%;">
+      <thead>
+        <tr>
+          <th>Glass Type</th>
+          <th>$/sqft</th>
+          <th>Active</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${appData.catalog.glassTypes.map((g, i) => `
+        <tr>
+          <td style="font-weight:600;">${g.label}</td>
+          <td id="gt-cost-${g.id}">
+            ${app.editMode === 'gt_' + g.id
+              ? `<input class="inline-edit-input" id="gt-edit-${g.id}" type="number" value="${g.costPerSqft}" step="0.25" min="0" />`
+              : `<span style="font-family:var(--font-title);font-weight:700;font-size:16px;">${fmt(g.costPerSqft)}</span>`
+            }
+          </td>
+          <td>
+            <label class="toggle-switch">
+              <input type="checkbox" ${g.active ? 'checked' : ''} data-toggle-glass="${g.id}" />
+              <span class="toggle-slider"></span>
+            </label>
+          </td>
+          <td>
+            ${app.editMode === 'gt_' + g.id
+              ? `<button class="btn btn-success btn-sm" data-save-glass="${g.id}">Save</button>`
+              : `<button class="btn btn-secondary btn-sm" data-edit-glass="${g.id}">Edit</button>`
+            }
+          </td>
+        </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  </div>
+</div>`;
+}
+
+function renderAdminLabor() {
+  const lr = appData.catalog.laborRate;
+  return `
+<div>
+  <div class="section-label mb-12">Labor Base Rate</div>
+  <div class="card mb-16">
+    <div class="flex-between">
+      <div>
+        <div style="font-size:14px;color:var(--text-2);">Base rate per pane</div>
+        <div style="font-family:var(--font-title);font-weight:800;font-size:28px;color:var(--amber);">
+          ${app.editMode === 'labor'
+            ? `<input class="inline-edit-input" id="labor-edit" type="number" value="${lr.baseRatePerPane}" step="5" min="0" style="width:120px;font-size:22px;" />`
+            : fmt(lr.baseRatePerPane)
+          }
+        </div>
+        <div style="font-size:12px;color:var(--text-3);">Effective: ${fmtDate(lr.effectiveDate)}</div>
+      </div>
+      ${app.editMode === 'labor'
+        ? `<button class="btn btn-success btn-sm" id="save-labor">Save</button>`
+        : `<button class="btn btn-secondary btn-sm" id="edit-labor">Edit</button>`
+      }
+    </div>
+  </div>
+
+  <div class="section-label mb-12">Floor Level Multipliers</div>
+  <div class="card mb-16" style="padding:0;overflow:hidden;">
+    <table class="admin-table">
+      <thead><tr><th>Level</th><th>Multiplier</th><th>Labor Impact</th></tr></thead>
+      <tbody>
+        ${appData.catalog.modifiers.floorLevel.map(m => `
+        <tr>
+          <td style="font-weight:600;">${m.label}</td>
+          <td>
+            ${app.editMode === 'fl_' + m.id
+              ? `<input class="inline-edit-input" id="fl-edit-${m.id}" type="number" value="${m.multiplier}" step="0.05" min="1" max="3" />`
+              : `<span style="font-family:var(--font-title);font-weight:700;">${m.multiplier}×</span>`
+            }
+          </td>
+          <td style="color:var(--text-2);">
+            ${fmt(lr.baseRatePerPane * m.multiplier)}
+          </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section-label mb-12">Access Difficulty Multipliers</div>
+  <div class="card" style="padding:0;overflow:hidden;">
+    <table class="admin-table">
+      <thead><tr><th>Access</th><th>Multiplier</th><th>Labor Impact</th></tr></thead>
+      <tbody>
+        ${appData.catalog.modifiers.accessDifficulty.map(m => `
+        <tr>
+          <td style="font-weight:600;">${m.label}</td>
+          <td><span style="font-family:var(--font-title);font-weight:700;">${m.multiplier}×</span></td>
+          <td style="color:var(--text-2);">${fmt(lr.baseRatePerPane * m.multiplier)}</td>
+        </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  </div>
+</div>`;
+}
+
+function renderAdminMaterials() {
+  const mr = appData.catalog.materialsRate;
+  return `
+<div>
+  <div class="section-label mb-12">Materials Rate</div>
+  <div class="card mb-16">
+    <div style="font-size:14px;color:var(--text-2);margin-bottom:4px;">Cost per linear inch of perimeter</div>
+    <div style="font-family:var(--font-title);font-weight:800;font-size:28px;color:var(--amber);">
+      ${app.editMode === 'mat'
+        ? `<input class="inline-edit-input" id="mat-edit" type="number" value="${mr.costPerLinearInch}" step="0.005" min="0" style="width:130px;font-size:22px;" />`
+        : ('$' + mr.costPerLinearInch.toFixed(3) + '/in')
+      }
+    </div>
+    <div style="font-size:12px;color:var(--text-3);margin-top:4px;">Effective: ${fmtDate(mr.effectiveDate)}</div>
+    <div style="margin-top:14px;">
+      ${app.editMode === 'mat'
+        ? `<button class="btn btn-success btn-sm" id="save-mat">Save</button>`
+        : `<button class="btn btn-secondary btn-sm" id="edit-mat">Edit</button>`
+      }
+    </div>
+  </div>
+
+  <div class="card" style="background:var(--bg-2);">
+    <div class="section-label mb-8">Materials Calculator Reference</div>
+    <div style="font-size:13px;color:var(--text-2);line-height:1.8;">
+      <div>24"×36" pane perimeter = 120 in → Materials = <strong style="color:var(--text-0);">${fmt(120 * mr.costPerLinearInch)}</strong></div>
+      <div>36"×48" pane perimeter = 168 in → Materials = <strong style="color:var(--text-0);">${fmt(168 * mr.costPerLinearInch)}</strong></div>
+      <div>48"×60" pane perimeter = 216 in → Materials = <strong style="color:var(--text-0);">${fmt(216 * mr.costPerLinearInch)}</strong></div>
+    </div>
+  </div>
+</div>`;
+}
+
+function renderAdminQuoteLog() {
+  const all = appData.quotes.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  return `
+<div>
+  <div class="section-label mb-12">All Quotes — ${all.length} total</div>
+  ${all.length === 0 ? `<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">No quotes yet</div></div>` : ''}
+  <div class="card" style="padding:0;overflow:hidden;">
+    <table class="admin-table" style="width:100%;">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Technician</th>
+          <th>Customer</th>
+          <th>Total</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${all.map(q => {
+          const statusMap = { sent: 'badge-sent', draft: 'badge-draft', flagged: 'badge-flagged', shown: 'badge-shown' };
+          return `
+          <tr>
+            <td style="font-size:13px;white-space:nowrap;">${fmtDate(q.jobDate)}</td>
+            <td style="font-size:13px;">${q.techName || '—'}</td>
+            <td style="font-size:14px;font-weight:600;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${q.customerName || '—'}</td>
+            <td style="font-family:var(--font-title);font-weight:700;font-size:16px;color:var(--amber);">${fmt(q.grandTotal)}</td>
+            <td><span class="badge ${statusMap[q.status] || 'badge-draft'}">${q.status}</span></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>
+</div>`;
+}
+
+/* ================================================================
+   SCREEN: CUSTOMER VIEW (PRESENTATION MODE)
+================================================================ */
+function renderCustomerView(quoteId) {
+  let q, jobCalc;
+  if (quoteId === '__draft__' && app.draft) {
+    const d = app.draft;
+    jobCalc = calcJob(d.panes, d.floorLevel, d.accessDifficulty, appData.catalog);
+    q = {
+      customerName: d.customerName,
+      customerContact: d.customerContact,
+      jobDate: d.jobDate,
+      panes: d.panes,
+      floorLevel: d.floorLevel,
+      accessDifficulty: d.accessDifficulty,
+      totalProduct: jobCalc.totalProduct,
+      totalLabor: jobCalc.totalLabor,
+      totalMaterials: jobCalc.totalMaterials,
+      grandTotal: jobCalc.grandTotal,
+    };
+  } else {
+    q = appData.quotes.find(x => x.id === quoteId);
+    if (!q) return '<div>Quote not found</div>';
+    jobCalc = { totalProduct: q.totalProduct, totalLabor: q.totalLabor, totalMaterials: q.totalMaterials, grandTotal: q.grandTotal };
+  }
+
+  const lineItems = q.panes.map((p, i) => {
+    const w_in = toIn(parseFloat(p.width), p.unit);
+    const h_in = toIn(parseFloat(p.height), p.unit);
+    const r = calcPane(w_in, h_in, p.glassTypeId, q.floorLevel, q.accessDifficulty, appData.catalog);
+    return { ...p, ...r, idx: i };
+  });
+
+  return `
+<div class="customer-view">
+  <button class="cv-close" id="cv-close-btn">✕</button>
+
+  <div class="cv-logo">FastGlass</div>
+  <div class="cv-subtitle">Window Pane Replacement Estimate</div>
+
+  <div class="cv-label">Customer</div>
+  <div class="cv-value">${q.customerName || 'Valued Customer'}</div>
+
+  <div class="cv-label">Date</div>
+  <div class="cv-value">${fmtDate(q.jobDate)}</div>
+
+  <div class="cv-divider"></div>
+
+  ${lineItems.map((item, i) => `
+  <div style="margin-bottom:16px;">
+    <div class="cv-label">Pane ${i+1} — ${getGlassLabel(item.glassTypeId)}</div>
+    <div class="cv-line-item"><span class="cv-line-label">${item.width}" × ${item.height}" (${item.sqft ? item.sqft.toFixed(2) : '—'} sqft)</span><span class="cv-line-value">${item.productCost ? fmt(item.productCost) : '—'}</span></div>
+    <div class="cv-line-item"><span class="cv-line-label">Labor</span><span class="cv-line-value">${item.laborCost ? fmt(item.laborCost) : '—'}</span></div>
+    <div class="cv-line-item"><span class="cv-line-label">Materials</span><span class="cv-line-value">${item.materialsCost ? fmt(item.materialsCost) : '—'}</span></div>
+  </div>
+  `).join('')}
+
+  <div class="cv-divider"></div>
+
+  <div class="cv-line-item"><span class="cv-line-label">Total Glass/Product</span><span class="cv-line-value">${fmt(q.totalProduct)}</span></div>
+  <div class="cv-line-item"><span class="cv-line-label">Total Labor</span><span class="cv-line-value">${fmt(q.totalLabor)}</span></div>
+  <div class="cv-line-item"><span class="cv-line-label">Total Materials</span><span class="cv-line-value">${fmt(q.totalMaterials)}</span></div>
+
+  <div class="cv-total" style="border-top:2px solid #000;margin-top:8px;">
+    <span class="cv-total-label">ESTIMATE TOTAL</span>
+    <span class="cv-total-value">${fmt(q.grandTotal)}</span>
+  </div>
+
+  <div class="cv-disclaimer">
+    This is an estimate only and is subject to final inspection upon completion of work. Actual costs may vary based on unforeseen conditions discovered during installation. This estimate does not constitute a binding contract. FastGlass reserves the right to adjust pricing based on final inspection findings. Does not include applicable taxes.
+  </div>
+</div>`;
+}
+
+/* ================================================================
+   EVENT HANDLERS
+================================================================ */
+function attachEvents() {
+  const on = (id, ev, fn) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener(ev, fn);
+  };
+  const delegate = (selector, ev, fn) => {
+    document.querySelectorAll(selector).forEach(el => el.addEventListener(ev, fn));
+  };
+
+  // ---- LOGIN ----
+  on('login-btn', 'click', handleLogin);
+  on('login-pass', 'keydown', e => { if (e.key === 'Enter') handleLogin(); });
+  on('login-user', 'keydown', e => { if (e.key === 'Enter') document.getElementById('login-pass')?.focus(); });
+
+  // ---- HOME ----
+  on('start-new-quote', 'click', () => {
+    app.draft = newDraft();
+    navigate('new-quote');
+  });
+  on('home-logout-btn', 'click', () => {
+    app.currentUser = null;
+    app.draft = null;
+    navigate('login');
+  });
+  on('home-admin-btn', 'click', () => navigate('admin'));
+  on('home-admin-btn2', 'click', () => navigate('admin'));
+  on('view-all-history', 'click', () => navigate('history'));
+
+  // History items on home
+  delegate('[data-quote-id]', 'click', e => {
+    const id = e.currentTarget.dataset.quoteId;
+    viewQuoteFromHistory(id);
+  });
+
+  // ---- NEW QUOTE STEP 1 ----
+  on('back-home', 'click', () => {
+    if (app.draft && (app.draft.customerName || app.draft.panes.length > 0)) {
+      if (!confirm('Leave this quote? Progress will be lost.')) return;
+    }
+    app.draft = null;
+    navigate('home');
+  });
+
+  // Customer inputs
+  on('cust-name', 'input', e => app.draft.customerName = e.target.value);
+  on('cust-contact', 'input', e => app.draft.customerContact = e.target.value);
+  on('cust-contact-type', 'change', e => app.draft.contactType = e.target.value);
+
+  // Glass type selection
+  delegate('[data-glass]', 'click', e => {
+    if (!app.draft) return;
+    app.draft.currentPane.glassTypeId = e.currentTarget.dataset.glass;
+    render();
+  });
+
+  // Unit toggle
+  on('unit-in', 'click', () => {
+    if (app.draft.currentPane.unit !== 'in') {
+      const w = parseFloat(app.draft.currentPane.width);
+      const h = parseFloat(app.draft.currentPane.height);
+      if (w) app.draft.currentPane.width = (w * 0.393701).toFixed(1);
+      if (h) app.draft.currentPane.height = (h * 0.393701).toFixed(1);
+      app.draft.currentPane.unit = 'in';
+      render();
+    }
+  });
+  on('unit-cm', 'click', () => {
+    if (app.draft.currentPane.unit !== 'cm') {
+      const w = parseFloat(app.draft.currentPane.width);
+      const h = parseFloat(app.draft.currentPane.height);
+      if (w) app.draft.currentPane.width = (w / 0.393701).toFixed(1);
+      if (h) app.draft.currentPane.height = (h / 0.393701).toFixed(1);
+      app.draft.currentPane.unit = 'cm';
+      render();
+    }
+  });
+
+  // Dimension inputs - live update for price preview
+  on('pane-width', 'input', e => {
+    app.draft.currentPane.width = e.target.value;
+    // Debounced re-render for price preview
+    clearTimeout(app._renderTimer);
+    app._renderTimer = setTimeout(() => render(), 300);
+  });
+  on('pane-height', 'input', e => {
+    app.draft.currentPane.height = e.target.value;
+    clearTimeout(app._renderTimer);
+    app._renderTimer = setTimeout(() => render(), 300);
+  });
+
+  // Floor/access modifiers
+  delegate('[data-floor]', 'click', e => {
+    app.draft.floorLevel = e.currentTarget.dataset.floor;
+    render();
+  });
+  delegate('[data-access]', 'click', e => {
+    app.draft.accessDifficulty = e.currentTarget.dataset.access;
+    render();
+  });
+
+  // Add pane
+  on('add-pane-btn', 'click', () => {
+    if (app.draft.panes.length >= 20) {
+      alert('Maximum 20 panes per quote.');
+      return;
+    }
+    const cp = app.draft.currentPane;
+    if (!cp.glassTypeId || !cp.width || !cp.height) return;
+    app.draft.panes.push({
+      id: genPaneId(),
+      glassTypeId: cp.glassTypeId,
+      width: cp.width,
+      height: cp.height,
+      unit: cp.unit,
+    });
+    // Reset current pane form (keep glass type selected for convenience)
+    app.draft.currentPane = { glassTypeId: cp.glassTypeId, width: '', height: '', unit: cp.unit };
+    render();
+  });
+
+  // Review quote (from step 1)
+  on('review-quote-btn', 'click', () => {
+    // If current pane has data, add it first
+    const cp = app.draft.currentPane;
+    if (cp.glassTypeId && cp.width && cp.height && parseFloat(cp.width) > 0 && parseFloat(cp.height) > 0) {
+      app.draft.panes.push({
+        id: genPaneId(),
+        glassTypeId: cp.glassTypeId,
+        width: cp.width,
+        height: cp.height,
+        unit: cp.unit,
+      });
+      app.draft.currentPane = { glassTypeId: null, width: '', height: '', unit: cp.unit };
+    }
+    if (app.draft.panes.length === 0) return;
+    app.draft.step = 2;
+    navigate('new-quote');
+  });
+
+  // Flag large pane
+  on('flag-large-pane', 'click', () => {
+    const d = app.draft;
+    const jobCalc = draftJobCalc();
+    const finalQuote = finalizeDraft('flagged');
+    navigate('sent', { quoteId: finalQuote.id });
+  });
+
+  // ---- STEP 2 ----
+  on('back-step1', 'click', () => {
+    app.draft.step = 1;
+    navigate('new-quote');
+  });
+  on('add-another-pane-btn', 'click', () => {
+    app.draft.step = 1;
+    navigate('new-quote');
+  });
+  on('proceed-to-review', 'click', () => {
+    app.draft.step = 3;
+    navigate('review');
+  });
+  delegate('[data-remove-pane]', 'click', e => {
+    const pid = e.currentTarget.dataset.removePane;
+    app.draft.panes = app.draft.panes.filter(p => p.id !== pid);
+    if (app.draft.panes.length === 0) {
+      app.draft.step = 1;
+      navigate('new-quote');
+    } else {
+      render();
+    }
+  });
+
+  // ---- REVIEW ----
+  on('back-to-pane-list', 'click', () => {
+    app.draft.step = 2;
+    navigate('new-quote');
+  });
+
+  on('show-customer-btn', 'click', () => {
+    // Show presentation mode
+    app.customerViewOpen = true;
+    app.customerViewQuoteId = '__draft__';
+    render();
+  });
+
+  on('send-quote-btn', 'click', () => {
+    app.sendModal = true;
+    render();
+  });
+
+  on('flag-review-btn', 'click', () => {
+    const finalQuote = finalizeDraft('flagged');
+    navigate('sent', { quoteId: finalQuote.id });
+  });
+
+  // Send modal
+  on('send-modal-overlay', 'click', e => {
+    if (e.target.id === 'send-modal-overlay') { app.sendModal = false; render(); }
+  });
+  on('close-send-modal', 'click', () => { app.sendModal = false; render(); });
+  on('send-sms-btn', 'click', () => {
+    const finalQuote = finalizeDraft('sent');
+    navigate('sent', { quoteId: finalQuote.id });
+  });
+  on('show-screen-btn', 'click', () => {
+    // Show presentation first, then save as 'shown' when closed
+    app.pendingSaveAsShown = true;
+    app.customerViewOpen = true;
+    app.customerViewQuoteId = '__draft__';
+    app.sendModal = false;
+    render();
+  });
+  on('send-with-contact-btn', 'click', () => {
+    const contact = document.getElementById('modal-contact')?.value;
+    const type = document.getElementById('modal-contact-type')?.value;
+    if (!contact) { alert('Please enter a contact to send to.'); return; }
+    app.draft.customerContact = contact;
+    app.draft.contactType = type;
+    const finalQuote = finalizeDraft('sent');
+    navigate('sent', { quoteId: finalQuote.id });
+  });
+
+  // ---- SENT ----
+  on('start-new-quote-from-sent', 'click', () => {
+    app.draft = newDraft();
+    navigate('new-quote');
+  });
+  on('view-history-btn', 'click', () => navigate('history'));
+
+  // ---- HISTORY ----
+  on('back-home-from-history', 'click', () => navigate('home'));
+  on('history-search', 'input', e => {
+    app.historySearch = e.target.value;
+    render();
+  });
+
+  // ---- ADMIN ----
+  on('back-home-admin', 'click', () => navigate('home'));
+  delegate('[data-tab]', 'click', e => {
+    app.activeTab = parseInt(e.currentTarget.dataset.tab);
+    app.editMode = null;
+    render();
+  });
+
+  // Admin glass type edits
+  delegate('[data-edit-glass]', 'click', e => {
+    app.editMode = 'gt_' + e.currentTarget.dataset.editGlass;
+    render();
+  });
+  delegate('[data-save-glass]', 'click', e => {
+    const id = e.currentTarget.dataset.saveGlass;
+    const val = parseFloat(document.getElementById('gt-edit-' + id)?.value);
+    if (val > 0) {
+      const g = appData.catalog.glassTypes.find(x => x.id === id);
+      if (g) { g.costPerSqft = val; appData.catalog.version++; appData.catalog.lastUpdated = new Date().toISOString(); saveState(appData); }
+    }
+    app.editMode = null;
+    render();
+  });
+  delegate('[data-toggle-glass]', 'change', e => {
+    const id = e.currentTarget.dataset.toggleGlass;
+    const g = appData.catalog.glassTypes.find(x => x.id === id);
+    if (g) { g.active = e.currentTarget.checked; saveState(appData); render(); }
+  });
+
+  // Admin labor edit
+  on('edit-labor', 'click', () => { app.editMode = 'labor'; render(); });
+  on('save-labor', 'click', () => {
+    const val = parseFloat(document.getElementById('labor-edit')?.value);
+    if (val > 0) {
+      appData.catalog.laborRate.baseRatePerPane = val;
+      appData.catalog.laborRate.effectiveDate = new Date().toISOString();
+      appData.catalog.version++;
+      saveState(appData);
+    }
+    app.editMode = null;
+    render();
+  });
+
+  // Admin materials edit
+  on('edit-mat', 'click', () => { app.editMode = 'mat'; render(); });
+  on('save-mat', 'click', () => {
+    const val = parseFloat(document.getElementById('mat-edit')?.value);
+    if (val > 0) {
+      appData.catalog.materialsRate.costPerLinearInch = val;
+      appData.catalog.materialsRate.effectiveDate = new Date().toISOString();
+      appData.catalog.version++;
+      saveState(appData);
+    }
+    app.editMode = null;
+    render();
+  });
+}
+
+function attachCustomerViewEvents() {
+  const closeBtn = document.getElementById('cv-close-btn');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      if (app.pendingSaveAsShown) {
+        const finalQuote = finalizeDraft('shown');
+        app.pendingSaveAsShown = false;
+        app.customerViewOpen = false;
+        app.customerViewQuoteId = null;
+        navigate('sent', { quoteId: finalQuote.id });
+      } else {
+        app.customerViewOpen = false;
+        app.customerViewQuoteId = null;
+        render();
+      }
+    });
+  }
+}
+
+/* ================================================================
+   AUTH
+================================================================ */
+function handleLogin() {
+  const username = document.getElementById('login-user')?.value.trim();
+  const password = document.getElementById('login-pass')?.value;
+  const errEl = document.getElementById('login-error');
+
+  const user = appData.users.find(u => u.username === username && u.password === password);
+  if (user) {
+    app.currentUser = user;
+    navigate('home');
+  } else {
+    if (errEl) errEl.textContent = 'Invalid username or password. Try tech1/demo or admin/demo.';
+  }
+}
+
+/* ================================================================
+   FINALIZE DRAFT → SAVE QUOTE
+================================================================ */
+function finalizeDraft(status) {
+  const d = app.draft;
+  const jobCalc = calcJob(d.panes, d.floorLevel, d.accessDifficulty, appData.catalog);
+  const quote = {
+    id: d.id,
+    techId: app.currentUser.id,
+    techName: app.currentUser.name,
+    customerName: d.customerName,
+    customerContact: d.customerContact,
+    contactType: d.contactType,
+    jobDate: d.jobDate,
+    status: status,
+    floorLevel: d.floorLevel,
+    accessDifficulty: d.accessDifficulty,
+    panes: d.panes,
+    totalProduct: jobCalc.totalProduct,
+    totalLabor: jobCalc.totalLabor,
+    totalMaterials: jobCalc.totalMaterials,
+    grandTotal: jobCalc.grandTotal,
+    catalogVersion: d.catalogVersion,
+    createdAt: new Date().toISOString(),
+    syncedAt: app.isOnline ? new Date().toISOString() : null,
+  };
+
+  // Remove any existing quote with same id (resend scenario)
+  appData.quotes = appData.quotes.filter(q => q.id !== quote.id);
+  appData.quotes.unshift(quote);
+  saveState(appData);
+  app.draft = null;
+  return quote;
+}
+
+/* ================================================================
+   VIEW QUOTE FROM HISTORY (REOPEN)
+================================================================ */
+function viewQuoteFromHistory(quoteId) {
+  const q = appData.quotes.find(x => x.id === quoteId);
+  if (!q) return;
+  // Rebuild a draft from the historical quote for re-presentation
+  app.draft = {
+    id: q.id,
+    customerName: q.customerName || '',
+    customerContact: q.customerContact || '',
+    contactType: q.contactType || 'phone',
+    jobDate: q.jobDate,
+    floorLevel: q.floorLevel,
+    accessDifficulty: q.accessDifficulty,
+    panes: q.panes,
+    currentPane: { glassTypeId: null, width: '', height: '', unit: 'in' },
+    step: 3,
+    catalogVersion: q.catalogVersion,
+    status: q.status,
+  };
+  navigate('review');
+}
+
+/* ================================================================
+   ONLINE/OFFLINE DETECTION
+================================================================ */
+window.addEventListener('online', () => {
+  app.isOnline = true;
+  appData.lastSync = new Date().toISOString();
+  saveState(appData);
+  render();
+});
+window.addEventListener('offline', () => {
+  app.isOnline = false;
+  render();
+});
+
+/* ================================================================
+   INIT
+================================================================ */
+function init() {
+  // Check for saved session
+  const savedSession = sessionStorage.getItem('fg_user');
+  if (savedSession) {
+    try {
+      app.currentUser = JSON.parse(savedSession);
+    } catch {}
+  }
+
+  render();
+
+  // Save session on user change
+  const originalNavigate = navigate;
+}
+
+// Persist session across page refreshes
+window.addEventListener('beforeunload', () => {
+  if (app.currentUser) {
+    sessionStorage.setItem('fg_user', JSON.stringify(app.currentUser));
+  } else {
+    sessionStorage.removeItem('fg_user');
+  }
+});
+
+init();
+</script>
+</body>
+</html>
