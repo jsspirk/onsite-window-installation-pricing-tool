@@ -983,6 +983,81 @@
     }
     .inline-edit-input:focus { outline: none; }
 
+    /* ================================================================
+       PANE TABS
+    ================================================================ */
+    .pane-tab-strip {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+      padding: 10px 0 2px;
+      border-top: 1px solid var(--border-1);
+    }
+    .pane-tab {
+      min-height: 38px;
+      padding: 0 14px;
+      background: var(--bg-3);
+      border: 1.5px solid var(--border-0);
+      border-radius: 100px;
+      color: var(--text-1);
+      font-family: var(--font-semi);
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .pane-tab:active { opacity: 0.8; }
+    .pane-tab.active {
+      background: var(--amber-bg);
+      border-color: var(--amber);
+      color: var(--amber);
+    }
+
+    /* ================================================================
+       QTY STEPPER
+    ================================================================ */
+    .qty-stepper {
+      display: flex;
+      align-items: center;
+      height: var(--touch-target);
+      background: var(--bg-input);
+      border: 1.5px solid var(--border-0);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+    .qty-btn {
+      width: 48px; height: 100%;
+      background: none; border: none;
+      color: var(--text-1);
+      font-size: 22px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s;
+      flex-shrink: 0;
+    }
+    .qty-btn:active { background: var(--bg-3); color: var(--amber); }
+    .qty-val {
+      flex: 1;
+      text-align: center;
+      font-family: var(--font-title);
+      font-weight: 800;
+      font-size: 22px;
+      color: var(--text-0);
+    }
+
+    /* ================================================================
+       GRID REVEAL
+    ================================================================ */
+    .grid-reveal {
+      background: var(--bg-2);
+      border: 1px solid var(--border-0);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      animation: fadeIn 0.15s ease;
+    }
+
     /* Send modal options */
     .send-option {
       display: flex; align-items: center; gap: 14px;
@@ -1015,20 +1090,41 @@
    CONSTANTS & DEFAULT CATALOG DATA
    (placeholder rates — Operations team to confirm before production)
 ================================================================ */
-const APP_VERSION = '1.0.0-prototype';
+const APP_VERSION = '1.1.0';
 const MAX_PANE_SIZE_IN = 120; // inches — trigger large-pane warning
+
+// Glass cost matrix ($/sqft, glass cost only — Busick price sheet 3.1.26)
+// null = requires custom quote, flag for office review
+const GLASS_MATRIX = {
+  '1/8"': {
+    clear:    { annealed: 7.72,  tempered: 11.97 },
+    hardcoat: { annealed: null,  tempered: null   },
+    c180:     { annealed: null,  tempered: null   },
+    c270:     { annealed: 12.01, tempered: 18.53  },
+    c360:     { annealed: 13.90, tempered: 20.39  },
+  },
+  '3/16"': {
+    clear:    { annealed: 8.66,  tempered: 13.00  },
+    hardcoat: { annealed: null,  tempered: null   },
+    c180:     { annealed: null,  tempered: null   },
+    c270:     { annealed: 13.98, tempered: 19.24  },
+    c360:     { annealed: 15.40, tempered: 22.40  },
+  },
+  '1/4"': {
+    clear:    { annealed: 8.66,  tempered: 13.00  },
+    hardcoat: { annealed: null,  tempered: null   },
+    c180:     { annealed: null,  tempered: null   },
+    c270:     { annealed: 13.98, tempered: 19.24  },
+    c360:     { annealed: 13.39, tempered: 19.48  },
+  },
+};
+const GRID_UPCHARGE = 50.00; // flat $ per unit when grid is enabled
+const SHAPE_MULTIPLIERS = { standard: 1.0, single_slope: 1.3, double_slope: 1.4, radius: 1.5 };
 
 const DEFAULT_CATALOG = {
   version: 1,
   lastUpdated: new Date().toISOString(),
-  glassTypes: [
-    { id: 'single',     label: 'Single Pane',        costPerSqft: 7.50,  active: true },
-    { id: 'double_igu', label: 'Double Pane IGU',     costPerSqft: 15.00, active: true },
-    { id: 'tempered',   label: 'Tempered',            costPerSqft: 12.50, active: true },
-    { id: 'laminated',  label: 'Laminated',           costPerSqft: 19.00, active: true },
-    { id: 'lowe_double',label: 'Low-E (Double Pane)', costPerSqft: 21.50, active: true },
-    { id: 'lowe_single',label: 'Low-E (Single Pane)', costPerSqft: 11.00, active: true },
-  ],
+  glassTypes: [], // legacy — pricing now in GLASS_MATRIX
   laborRate: {
     baseRatePerPane: 85.00,
     effectiveDate: new Date().toISOString(),
@@ -1069,11 +1165,16 @@ const SAMPLE_QUOTES = [
     status: 'sent',
     floorLevel: 'ground',
     accessDifficulty: 'standard',
+    jobNum: '',
+    notes: '',
+    toolsRequired: '',
     panes: [
-      { id: 'p1', glassTypeId: 'double_igu', width: 36, height: 48, unit: 'in' }
+      { id: 'p1', thickness: '1/4"', coating: 'c270', finish: 'annealed', spacer: 'grey',
+        gridEnabled: false, gridH: 0, gridV: 0, gridSize: '', gridColor: '',
+        shape: 'standard', location: 'Living Rm', qty: 1,
+        oa: '', width: 36, height: 48, unit: 'in' }
     ],
-    totalProduct: 45.00, totalLabor: 85.00, totalMaterials: 10.92,
-    grandTotal: 140.92,
+    totalProduct: 0, totalLabor: 0, totalMaterials: 0, grandTotal: 0,
     catalogVersion: 1,
     createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
   },
@@ -1088,12 +1189,16 @@ const SAMPLE_QUOTES = [
     status: 'sent',
     floorLevel: 'second',
     accessDifficulty: 'ladder',
+    jobNum: 'EST-2041',
+    notes: 'Both windows same size. Second floor bedroom.',
+    toolsRequired: '6ft ladder',
     panes: [
-      { id: 'p1', glassTypeId: 'tempered', width: 24, height: 36, unit: 'in' },
-      { id: 'p2', glassTypeId: 'tempered', width: 24, height: 36, unit: 'in' },
+      { id: 'p1', thickness: '1/8"', coating: 'clear', finish: 'tempered', spacer: 'mill',
+        gridEnabled: true, gridH: 2, gridV: 3, gridSize: '5/8"', gridColor: 'White',
+        shape: 'standard', location: 'Master BR', qty: 2,
+        oa: '', width: 24, height: 36, unit: 'in' },
     ],
-    totalProduct: 75.00, totalLabor: 215.58, totalMaterials: 15.60,
-    grandTotal: 306.18,
+    totalProduct: 0, totalLabor: 0, totalMaterials: 0, grandTotal: 0,
     catalogVersion: 1,
     createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
   },
@@ -1148,37 +1253,47 @@ const app = {
 /* ================================================================
    PRICING ENGINE
 ================================================================ */
-function calcPane(width_in, height_in, glassTypeId, floorModId, accessModId, catalog) {
-  const gt = catalog.glassTypes.find(g => g.id === glassTypeId);
-  if (!gt) return null;
-  const sqft = (width_in * height_in) / 144;
-  const productCost = sqft * gt.costPerSqft;
-  const perimeter = 2 * (width_in + height_in);
-  const materialsCost = perimeter * catalog.materialsRate.costPerLinearInch;
+function calcPane(pane, floorModId, accessModId, catalog) {
+  const qty = pane.qty || 1;
+  const w_in = pane.unit === 'cm' ? parseFloat(pane.width) * 0.393701 : parseFloat(pane.width);
+  const h_in = pane.unit === 'cm' ? parseFloat(pane.height) * 0.393701 : parseFloat(pane.height);
+  if (!w_in || !h_in || w_in <= 0 || h_in <= 0) return null;
+
   const floorMod = catalog.modifiers.floorLevel.find(m => m.id === floorModId) || catalog.modifiers.floorLevel[0];
   const accessMod = catalog.modifiers.accessDifficulty.find(m => m.id === accessModId) || catalog.modifiers.accessDifficulty[0];
-  const laborCost = catalog.laborRate.baseRatePerPane * floorMod.multiplier * accessMod.multiplier;
-  return {
-    sqft: +sqft.toFixed(4),
-    productCost: +productCost.toFixed(2),
-    materialsCost: +materialsCost.toFixed(2),
-    laborCost: +laborCost.toFixed(2),
-    lineTotal: +(productCost + materialsCost + laborCost).toFixed(2),
-  };
+  const perimeter = 2 * (w_in + h_in);
+  const sqft1 = (w_in * h_in) / 144; // sqft per unit
+  const laborCost = catalog.laborRate.baseRatePerPane * floorMod.multiplier * accessMod.multiplier * qty;
+  const materialsCost = +(perimeter * catalog.materialsRate.costPerLinearInch * qty).toFixed(2);
+
+  // New format: thickness/coating/finish
+  if (pane.thickness && pane.coating && pane.finish) {
+    const costPerSqft = GLASS_MATRIX[pane.thickness]?.[pane.coating]?.[pane.finish];
+    if (costPerSqft === null || costPerSqft === undefined) return { requiresQuote: true };
+    const shapeMult = SHAPE_MULTIPLIERS[pane.shape] || 1.0;
+    const gridUpcharge = pane.gridEnabled ? GRID_UPCHARGE : 0;
+    const productCost = +((sqft1 * costPerSqft * shapeMult + gridUpcharge) * qty).toFixed(2);
+    const lineTotal = +(productCost + materialsCost + laborCost).toFixed(2);
+    return {
+      sqft: +(sqft1 * qty).toFixed(4),
+      productCost, materialsCost, laborCost, lineTotal,
+      requiresQuote: false,
+    };
+  }
+
+  return null;
 }
 
 function calcJob(panes, floorModId, accessModId, catalog) {
   let totalProduct = 0, totalLabor = 0, totalMaterials = 0;
   const lineItems = panes.map(p => {
-    const w = p.unit === 'cm' ? p.width * 0.393701 : p.width;
-    const h = p.unit === 'cm' ? p.height * 0.393701 : p.height;
-    const r = calcPane(w, h, p.glassTypeId, floorModId, accessModId, catalog);
-    if (!r) return null;
+    const r = calcPane(p, floorModId, accessModId, catalog);
+    if (!r || r.requiresQuote) return null;
     totalProduct += r.productCost;
     totalLabor += r.laborCost;
     totalMaterials += r.materialsCost;
     return { ...p, ...r };
-  });
+  }).filter(Boolean);
   const grandTotal = totalProduct + totalLabor + totalMaterials;
   return {
     lineItems,
@@ -1189,8 +1304,7 @@ function calcJob(panes, floorModId, accessModId, catalog) {
   };
 }
 
-function inToCm(v) { return (v / 0.393701).toFixed(1); }
-function toIn(v, unit) { return unit === 'cm' ? v * 0.393701 : v; }
+function toIn(v, unit) { return unit === 'cm' ? parseFloat(v) * 0.393701 : parseFloat(v); }
 
 /* ================================================================
    ROUTING
@@ -1220,8 +1334,16 @@ function genPaneId() {
   return 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 }
 function getGlassLabel(id) {
-  const g = appData.catalog.glassTypes.find(x => x.id === id);
-  return g ? g.label : id;
+  const legacy = { single: 'Single Pane', double_igu: 'Double Pane IGU', tempered: 'Tempered',
+                   laminated: 'Laminated', lowe_double: 'Low-E (Double)', lowe_single: 'Low-E (Single)' };
+  return legacy[id] || id;
+}
+function getPaneLabel(pane) {
+  if (pane.glassTypeId) return getGlassLabel(pane.glassTypeId);
+  const coatingMap = { clear: 'Clear', hardcoat: 'Hardcoat', c180: 'C180', c270: 'C270/2', c360: 'C360/366' };
+  const finishMap  = { annealed: 'Ann.', tempered: 'Temp.' };
+  const parts = [pane.thickness, coatingMap[pane.coating], finishMap[pane.finish]].filter(Boolean);
+  return parts.join(' · ');
 }
 function getModLabel(type, id) {
   const arr = type === 'floor' ? appData.catalog.modifiers.floorLevel : appData.catalog.modifiers.accessDifficulty;
@@ -1243,6 +1365,25 @@ function getCatalogWarning() {
 /* ================================================================
    NEW QUOTE STATE HELPERS
 ================================================================ */
+function freshPane(from) {
+  return {
+    thickness:   from?.thickness   || '1/8"',
+    coating:     from?.coating     || 'clear',
+    finish:      from?.finish      || 'annealed',
+    spacer:      from?.spacer      || 'mill',
+    spacerOther: '',
+    gridEnabled: false,
+    gridH: 0, gridV: 0, gridSize: '', gridColor: '',
+    shape:    'standard',
+    location: '',
+    qty:      1,
+    oa:       '',
+    width:    '',
+    height:   '',
+    unit:     from?.unit || 'in',
+  };
+}
+
 function newDraft() {
   return {
     id: genId(),
@@ -1250,16 +1391,15 @@ function newDraft() {
     customerContact: '',
     contactType: 'phone',
     jobDate: new Date().toISOString(),
+    jobNum: '',
+    notes: '',
+    toolsRequired: '',
     floorLevel: 'ground',
     accessDifficulty: 'standard',
     panes: [],
-    currentPane: {
-      glassTypeId: null,
-      width: '',
-      height: '',
-      unit: 'in',
-    },
-    step: 1, // 1=pane input, 2=pane list review, 3=quote summary
+    currentPane: freshPane(),
+    editingPaneIdx: null,
+    step: 1,
     catalogVersion: appData.catalog.version,
     status: 'draft',
   };
@@ -1272,11 +1412,8 @@ function draftJobCalc() {
 
 function draftCurrentPaneCalc() {
   const cp = app.draft?.currentPane;
-  if (!cp || !cp.glassTypeId || !cp.width || !cp.height) return null;
-  const w = toIn(parseFloat(cp.width), cp.unit);
-  const h = toIn(parseFloat(cp.height), cp.unit);
-  if (!w || !h || w <= 0 || h <= 0) return null;
-  return calcPane(w, h, cp.glassTypeId, app.draft.floorLevel, app.draft.accessDifficulty, appData.catalog);
+  if (!cp || !cp.thickness || !cp.coating || !cp.finish || !cp.width || !cp.height) return null;
+  return calcPane(cp, app.draft.floorLevel, app.draft.accessDifficulty, appData.catalog);
 }
 
 /* ================================================================
@@ -1442,14 +1579,27 @@ function stepIndicator(active) {
 function renderNewQuoteStep1() {
   const d = app.draft;
   const cp = d.currentPane;
+  const isEditing = d.editingPaneIdx !== null && d.editingPaneIdx !== undefined;
   const paneCalc = draftCurrentPaneCalc();
   const jobCalc = draftJobCalc();
-  const largePaneWarn = cp.width && cp.height && isLargePaneWarning(
-    toIn(parseFloat(cp.width), cp.unit), toIn(parseFloat(cp.height), cp.unit)
-  );
   const catalogWarn = getCatalogWarning();
-  const canAddPane = cp.glassTypeId && cp.width && cp.height && parseFloat(cp.width) > 0 && parseFloat(cp.height) > 0;
+
+  const w_in = toIn(cp.width || 0, cp.unit);
+  const h_in = toIn(cp.height || 0, cp.unit);
+  const largePaneWarn = cp.width && cp.height && isLargePaneWarning(w_in, h_in);
+  const needsQuote = paneCalc?.requiresQuote;
+
+  const canSave = cp.thickness && cp.coating && cp.finish &&
+                  parseFloat(cp.width) > 0 && parseFloat(cp.height) > 0 && !needsQuote && !largePaneWarn;
   const canReview = d.panes.length > 0;
+
+  const today = new Date(d.jobDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+  const THICKNESS_OPTS = ['1/8"', '3/16"', '1/4"'];
+  const COATING_OPTS   = [{id:'clear',label:'Clear'},{id:'hardcoat',label:'Hardcoat'},{id:'c180',label:'C180'},{id:'c270',label:'C270/2'},{id:'c360',label:'C360/366'}];
+  const FINISH_OPTS    = [{id:'annealed',label:'Annealed'},{id:'tempered',label:'Tempered'}];
+  const SPACER_OPTS    = [{id:'mill',label:'Mill SP.'},{id:'grey',label:'Grey'},{id:'black',label:'Black'},{id:'other',label:'Other'}];
+  const SHAPE_OPTS     = [{id:'standard',label:'Standard'},{id:'single_slope',label:'Single Slope'},{id:'double_slope',label:'Dbl Slope'},{id:'radius',label:'Radius'}];
 
   return `
 <div class="screen" style="background:var(--bg-0);">
@@ -1463,134 +1613,214 @@ function renderNewQuoteStep1() {
   <div class="scroll-content" style="padding-bottom:160px;">
     ${catalogWarn ? `<div class="alert alert-warning"><span class="alert-icon">⚠</span>${catalogWarn}</div>` : ''}
 
-    <!-- Customer Info -->
-    <div class="card mb-16">
-      <div class="section-label mb-12">Customer (Optional at this step)</div>
-      <div class="form-group mb-12">
-        <label class="form-label">Customer Name</label>
-        <input class="form-input" id="cust-name" placeholder="Full name or company" value="${d.customerName}" />
+    <!-- JOB INFO -->
+    <div class="card mb-12">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <span style="font-size:13px;color:var(--text-2);">${today}</span>
+        <span style="font-size:13px;color:var(--text-2);">${app.currentUser?.name||''}</span>
+      </div>
+      <div class="form-row mb-12">
+        <div class="form-group">
+          <label class="form-label">Customer</label>
+          <input class="form-input" id="cust-name" placeholder="Name or company" value="${d.customerName}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Job / Est. #</label>
+          <input class="form-input" id="job-num" placeholder="Optional" value="${d.jobNum||''}" />
+        </div>
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Phone / Email</label>
-          <input class="form-input" id="cust-contact" placeholder="Contact info" value="${d.customerContact}" />
+          <label class="form-label">Contact</label>
+          <input class="form-input" id="cust-contact" placeholder="Phone or email" value="${d.customerContact}" />
         </div>
         <div class="form-group">
           <label class="form-label">Type</label>
           <select class="form-input" id="cust-contact-type">
-            <option value="phone" ${d.contactType === 'phone' ? 'selected' : ''}>📱 Phone</option>
-            <option value="email" ${d.contactType === 'email' ? 'selected' : ''}>✉ Email</option>
+            <option value="phone" ${d.contactType==='phone'?'selected':''}>📱 Phone</option>
+            <option value="email" ${d.contactType==='email'?'selected':''}>✉ Email</option>
           </select>
         </div>
       </div>
     </div>
 
-    <!-- Glass Type -->
-    <div class="section-label mb-8">Glass Type</div>
-    <div class="glass-grid mb-16">
-      ${appData.catalog.glassTypes.filter(g => g.active).map(g => `
-        <div class="glass-option ${cp.glassTypeId === g.id ? 'active' : ''}" data-glass="${g.id}">
-          <div class="glass-option-name">${g.label}</div>
-          <div class="glass-option-price">${fmt(g.costPerSqft)}/sqft</div>
-        </div>
-      `).join('')}
+    <!-- FLOOR + ACCESS -->
+    <div class="section-label mb-8">Floor Level</div>
+    <div class="chip-group mb-12">
+      ${appData.catalog.modifiers.floorLevel.map(m=>`
+        <div class="chip ${d.floorLevel===m.id?'active':''}" data-floor="${m.id}">
+          ${m.label}<span style="font-size:11px;opacity:0.7;">${m.multiplier!==1?' +'+Math.round((m.multiplier-1)*100)+'%':''}</span>
+        </div>`).join('')}
     </div>
-
-    <!-- Dimensions -->
-    <div class="section-label mb-8">Dimensions</div>
-    <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
-      <div class="unit-toggle" style="width:120px;">
-        <button class="unit-toggle-btn ${cp.unit === 'in' ? 'active' : ''}" id="unit-in">IN</button>
-        <button class="unit-toggle-btn ${cp.unit === 'cm' ? 'active' : ''}" id="unit-cm">CM</button>
-      </div>
-    </div>
-    <div class="form-row mb-4">
-      <div class="form-group">
-        <label class="form-label">Width (${cp.unit})</label>
-        <input class="form-input form-input-large" id="pane-width" type="number"
-          inputmode="decimal" placeholder="0" value="${cp.width}" min="1" max="300" />
-      </div>
-      <div class="form-group">
-        <label class="form-label">Height (${cp.unit})</label>
-        <input class="form-input form-input-large" id="pane-height" type="number"
-          inputmode="decimal" placeholder="0" value="${cp.height}" min="1" max="300" />
-      </div>
-    </div>
-    ${largePaneWarn ? `
-      <div class="alert alert-warning mb-12">
-        <span class="alert-icon">⚠</span>
-        Pane size exceeds standard catalog. Flag this job for office review.
-      </div>
-    ` : ''}
-
-    <!-- Modifiers -->
-    <div class="section-label mb-8 mt-16">Floor Level</div>
-    <div class="chip-group mb-16">
-      ${appData.catalog.modifiers.floorLevel.map(m => `
-        <div class="chip ${d.floorLevel === m.id ? 'active' : ''}" data-floor="${m.id}">
-          ${m.label}
-          <span style="font-size:11px;opacity:0.7;">${m.multiplier !== 1 ? '+' + Math.round((m.multiplier-1)*100) + '%' : ''}</span>
-        </div>
-      `).join('')}
-    </div>
-
     <div class="section-label mb-8">Access Difficulty</div>
     <div class="chip-group mb-16">
-      ${appData.catalog.modifiers.accessDifficulty.map(m => `
-        <div class="chip ${d.accessDifficulty === m.id ? 'active' : ''}" data-access="${m.id}">
-          ${m.label}
-          <span style="font-size:11px;opacity:0.7;">${m.multiplier !== 1 ? '+' + Math.round((m.multiplier-1)*100) + '%' : ''}</span>
-        </div>
-      `).join('')}
+      ${appData.catalog.modifiers.accessDifficulty.map(m=>`
+        <div class="chip ${d.accessDifficulty===m.id?'active':''}" data-access="${m.id}">
+          ${m.label}<span style="font-size:11px;opacity:0.7;">${m.multiplier!==1?' +'+Math.round((m.multiplier-1)*100)+'%':''}</span>
+        </div>`).join('')}
     </div>
 
-    <!-- Pane price preview -->
-    ${paneCalc ? `
-    <div class="card" style="border-color: var(--border-0);">
-      <div class="section-label mb-8">This Pane — Preview</div>
+    <!-- PANE TABS -->
+    ${d.panes.length>0?`
+    <div class="pane-tab-strip">
+      <button class="pane-tab ${!isEditing?'active':''}" id="pane-tab-new">+ New</button>
+      ${d.panes.map((p,i)=>`
+        <button class="pane-tab ${isEditing&&d.editingPaneIdx===i?'active':''}" data-edit-pane-idx="${i}">
+          ${i+1}${p.location?' · '+p.location.slice(0,8):''}
+        </button>`).join('')}
+    </div>`:''}
+
+    <!-- THIS WINDOW CARD -->
+    <div class="card" style="border-color:${isEditing?'var(--blue)':'var(--border-0)'};">
+      <div class="section-label mb-12" style="color:${isEditing?'var(--blue)':'var(--text-2)'};">
+        ${isEditing?'Editing Pane '+(d.editingPaneIdx+1):'This Window'}
+      </div>
+
+      <div class="form-row mb-12">
+        <div class="form-group">
+          <label class="form-label">Location</label>
+          <input class="form-input" id="pane-location" placeholder="e.g. Kitchen L" value="${cp.location||''}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Qty</label>
+          <div class="qty-stepper">
+            <button class="qty-btn" id="qty-dec">−</button>
+            <span class="qty-val">${cp.qty||1}</span>
+            <button class="qty-btn" id="qty-inc">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:8px;">
+        <div class="form-group">
+          <label class="form-label">Width (${cp.unit})</label>
+          <input class="form-input form-input-large" id="pane-width" type="number" inputmode="decimal" placeholder="0" value="${cp.width}" min="1" max="300" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Height (${cp.unit})</label>
+          <input class="form-input form-input-large" id="pane-height" type="number" inputmode="decimal" placeholder="0" value="${cp.height}" min="1" max="300" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">OA (${cp.unit})</label>
+          <input class="form-input form-input-large" id="pane-oa" type="number" inputmode="decimal" placeholder="—" value="${cp.oa||''}" min="1" max="300" />
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
+        <div class="unit-toggle" style="width:120px;">
+          <button class="unit-toggle-btn ${cp.unit==='in'?'active':''}" id="unit-in">IN</button>
+          <button class="unit-toggle-btn ${cp.unit==='cm'?'active':''}" id="unit-cm">CM</button>
+        </div>
+      </div>
+      ${largePaneWarn?`<div class="alert alert-warning mb-12"><span class="alert-icon">⚠</span>Pane exceeds standard catalog size. Flag for office review.</div>`:''}
+
+      <div class="section-label mb-8">Thickness</div>
+      <div class="chip-group mb-16">
+        ${THICKNESS_OPTS.map(t=>`<div class="chip ${cp.thickness===t?'active':''}" data-thickness="${t}">${t}</div>`).join('')}
+      </div>
+
+      <div class="section-label mb-8">Coating / Low-E</div>
+      <div class="chip-group mb-16">
+        ${COATING_OPTS.map(c=>`<div class="chip ${cp.coating===c.id?'active':''}" data-coating="${c.id}">${c.label}</div>`).join('')}
+      </div>
+
+      <div class="section-label mb-8">Finish</div>
+      <div class="chip-group mb-16">
+        ${FINISH_OPTS.map(f=>`<div class="chip ${cp.finish===f.id?'active':''}" data-finish="${f.id}">${f.label}</div>`).join('')}
+      </div>
+
+      <div class="section-label mb-8">Spacer</div>
+      <div class="chip-group mb-12">
+        ${SPACER_OPTS.map(s=>`<div class="chip ${cp.spacer===s.id?'active':''}" data-spacer="${s.id}">${s.label}</div>`).join('')}
+      </div>
+      ${cp.spacer==='other'?`<input class="form-input mb-16" id="spacer-other" placeholder="Specify spacer" value="${cp.spacerOther||''}" />`:'<div style="margin-bottom:16px;"></div>'}
+
+      <div class="toggle-wrap mb-12">
+        <span class="section-label">Grid</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="grid-toggle" ${cp.gridEnabled?'checked':''} />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      ${cp.gridEnabled?`
+      <div class="grid-reveal mb-16">
+        <div class="form-row mb-10">
+          <div class="form-group">
+            <label class="form-label">Horizontal (H)</label>
+            <div class="qty-stepper">
+              <button class="qty-btn" data-grid-adj="h" data-dir="-1">−</button>
+              <span class="qty-val">${cp.gridH||0}</span>
+              <button class="qty-btn" data-grid-adj="h" data-dir="1">+</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Vertical (V)</label>
+            <div class="qty-stepper">
+              <button class="qty-btn" data-grid-adj="v" data-dir="-1">−</button>
+              <span class="qty-val">${cp.gridV||0}</span>
+              <button class="qty-btn" data-grid-adj="v" data-dir="1">+</button>
+            </div>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Mutton Size</label>
+            <input class="form-input" id="grid-size" placeholder='e.g. 5/8"' value="${cp.gridSize||''}" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Color</label>
+            <input class="form-input" id="grid-color" placeholder="White, Tan…" value="${cp.gridColor||''}" />
+          </div>
+        </div>
+      </div>`:'<div style="margin-bottom:16px;"></div>'}
+
+      <div class="section-label mb-8">Shape</div>
+      <div class="chip-group mb-4">
+        ${SHAPE_OPTS.map(s=>`
+          <div class="chip ${cp.shape===s.id?'active':''}" data-shape="${s.id}">
+            ${s.label}${s.id!=='standard'?` <span style="font-size:11px;opacity:0.8;">×${SHAPE_MULTIPLIERS[s.id]}</span>`:''}
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <!-- PRICE PREVIEW -->
+    ${needsQuote?`
+    <div class="alert alert-warning mt-12"><span class="alert-icon">⚠</span>This combination requires a custom quote — flag for office review.</div>
+    `:paneCalc?`
+    <div class="card mt-12" style="border-color:var(--border-0);">
+      <div class="section-label mb-8">
+        ${isEditing?'Pane '+(d.editingPaneIdx+1)+' — Updated Preview':'This Pane — Preview'}
+        ${cp.qty>1?` <span style="color:var(--amber);">(×${cp.qty})</span>`:''}
+      </div>
       <div class="price-row">
-        <span class="price-row-label">Glass (${paneCalc.sqft.toFixed(2)} sqft)</span>
+        <span class="price-row-label">Glass (${paneCalc.sqft.toFixed(2)} sqft${cp.gridEnabled?' + grid':''}${cp.shape!=='standard'?' · '+SHAPE_MULTIPLIERS[cp.shape]+'×':''})</span>
         <span class="price-row-value">${fmt(paneCalc.productCost)}</span>
       </div>
-      <div class="price-row">
-        <span class="price-row-label">Labor</span>
-        <span class="price-row-value">${fmt(paneCalc.laborCost)}</span>
-      </div>
-      <div class="price-row">
-        <span class="price-row-label">Materials</span>
-        <span class="price-row-value">${fmt(paneCalc.materialsCost)}</span>
-      </div>
+      <div class="price-row"><span class="price-row-label">Labor</span><span class="price-row-value">${fmt(paneCalc.laborCost)}</span></div>
+      <div class="price-row"><span class="price-row-label">Materials</span><span class="price-row-value">${fmt(paneCalc.materialsCost)}</span></div>
       <div class="price-total-row">
         <span class="price-total-label">Pane Total</span>
         <span class="price-total-value">${fmt(paneCalc.lineTotal)}</span>
       </div>
-    </div>
-    ` : ''}
+    </div>`:''}
 
-    ${d.panes.length > 0 ? `
-    <div style="margin-top:12px; padding:10px 14px; background:var(--bg-2); border-radius:var(--radius-md); display:flex; justify-content:space-between; align-items:center;">
-      <span class="text-muted text-sm">${d.panes.length} pane${d.panes.length > 1 ? 's' : ''} added</span>
-      <span style="font-family:var(--font-title); font-weight:800; font-size:20px; color:var(--amber);">
-        ${fmt(jobCalc ? jobCalc.grandTotal + (paneCalc ? paneCalc.lineTotal : 0) : 0)} est.
-      </span>
-    </div>
-    ` : ''}
+    ${d.panes.length>0?`
+    <div style="margin-top:12px;padding:10px 14px;background:var(--bg-2);border-radius:var(--radius-md);display:flex;justify-content:space-between;align-items:center;">
+      <span class="text-muted text-sm">${d.panes.length} pane${d.panes.length!==1?'s':''} added</span>
+      <span style="font-family:var(--font-title);font-weight:800;font-size:20px;color:var(--amber);">${fmt(jobCalc?jobCalc.grandTotal:0)} est.</span>
+    </div>`:''}
   </div>
 
-  <!-- Action Bar -->
-  <div class="action-bar" style="flex-direction:column; gap:8px;">
-    <div style="display:flex; gap:8px;">
-      <button class="btn btn-secondary" id="add-pane-btn" ${!canAddPane ? 'disabled' : ''} style="flex:1;">
-        + Add Pane ${d.panes.length > 0 ? `(${d.panes.length})` : ''}
+  <div class="action-bar" style="flex-direction:column;gap:8px;">
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" id="add-pane-btn" ${!canSave?'disabled':''} style="flex:1;">
+        ${isEditing?'✓ Update Pane':'+ Add Pane'+(d.panes.length>0&&!isEditing?' ('+d.panes.length+')':'')}
       </button>
-      <button class="btn btn-primary" id="review-quote-btn" ${!canReview ? 'disabled' : ''} style="flex:2;">
+      <button class="btn btn-primary" id="review-quote-btn" ${!canReview?'disabled':''} style="flex:2;">
         Review Quote →
       </button>
     </div>
-    ${!canAddPane && !canReview ? `<p style="text-align:center;font-size:13px;color:var(--text-3);">Select glass type and enter dimensions to continue</p>` : ''}
-    ${largePaneWarn ? `
-      <button class="btn btn-danger btn-full btn-sm" id="flag-large-pane">⚑ Flag for Office Review</button>
-    ` : ''}
+    ${needsQuote||largePaneWarn?`<button class="btn btn-danger btn-full btn-sm" id="flag-large-pane">⚑ Flag for Office Review</button>`:''}
+    ${!canSave&&!canReview&&!needsQuote&&!largePaneWarn?`<p style="text-align:center;font-size:13px;color:var(--text-3);">Select thickness, coating, finish and enter dimensions</p>`:''}
   </div>
 </div>`;
 }
@@ -1615,20 +1845,20 @@ function renderNewQuoteStep2() {
     </div>
 
     ${d.panes.map((p, i) => {
-      const w_in = toIn(parseFloat(p.width), p.unit);
-      const h_in = toIn(parseFloat(p.height), p.unit);
-      const r = calcPane(w_in, h_in, p.glassTypeId, d.floorLevel, d.accessDifficulty, appData.catalog);
+      const r = calcPane(p, d.floorLevel, d.accessDifficulty, appData.catalog);
+      const label = getPaneLabel(p);
+      const qty = p.qty || 1;
       return `
       <div class="pane-item">
         <div class="pane-item-num">${i+1}</div>
         <div class="pane-item-info">
-          <div class="pane-item-type">${getGlassLabel(p.glassTypeId)}</div>
-          <div class="pane-item-dims">${p.width}" × ${p.height}" ${p.unit !== 'in' ? '(' + p.unit + ')' : ''} · ${r ? r.sqft.toFixed(2) + ' sqft' : ''}</div>
-          <div style="font-size:12px; color:var(--text-2); margin-top:2px;">
-            Glass ${r ? fmt(r.productCost) : '—'} · Labor ${r ? fmt(r.laborCost) : '—'} · Matls ${r ? fmt(r.materialsCost) : '—'}
+          <div class="pane-item-type">${label}${p.location?' · <span style="color:var(--text-2);font-weight:400;">'+p.location+'</span>':''}</div>
+          <div class="pane-item-dims">${p.width}" × ${p.height}"${qty>1?' × '+qty:''}${r&&!r.requiresQuote?' · '+r.sqft.toFixed(2)+' sqft':''}</div>
+          <div style="font-size:12px;color:var(--text-2);margin-top:2px;">
+            ${r&&!r.requiresQuote?'Glass '+fmt(r.productCost)+' · Labor '+fmt(r.laborCost)+' · Matls '+fmt(r.materialsCost):'<span style="color:var(--orange);">⚑ Requires custom quote</span>'}
           </div>
         </div>
-        <div class="pane-item-price">${r ? fmt(r.lineTotal) : '—'}</div>
+        <div class="pane-item-price">${r&&!r.requiresQuote?fmt(r.lineTotal):'—'}</div>
         <button class="pane-item-remove" data-remove-pane="${p.id}">✕</button>
       </div>`;
     }).join('')}
@@ -1685,10 +1915,13 @@ function renderReview() {
     <div class="card mb-12">
       <div class="section-label mb-8">Customer</div>
       <div style="font-family:var(--font-semi);font-weight:700;font-size:18px;color:var(--text-0);">
-        ${d.customerName || '<span style="color:var(--text-3);font-weight:400;font-style:italic;">No name entered</span>'}
+        ${d.customerName||'<span style="color:var(--text-3);font-weight:400;font-style:italic;">No name entered</span>'}
       </div>
-      ${d.customerContact ? `<div style="font-size:15px;color:var(--text-1);margin-top:4px;">${d.contactType === 'email' ? '✉' : '📱'} ${d.customerContact}</div>` : ''}
-      <div style="font-size:13px;color:var(--text-2);margin-top:4px;">${fmtDate(d.jobDate)}</div>
+      ${d.customerContact?`<div style="font-size:15px;color:var(--text-1);margin-top:4px;">${d.contactType==='email'?'✉':'📱'} ${d.customerContact}</div>`:''}
+      <div style="display:flex;gap:16px;margin-top:6px;">
+        <div style="font-size:13px;color:var(--text-2);">${fmtDate(d.jobDate)}</div>
+        ${d.jobNum?`<div style="font-size:13px;color:var(--text-2);">Job# <strong style="color:var(--text-1);">${d.jobNum}</strong></div>`:''}
+      </div>
     </div>
 
     <!-- Modifiers -->
@@ -1698,14 +1931,14 @@ function renderReview() {
         <div style="flex:1;">
           <div style="font-size:12px;color:var(--text-2);">FLOOR LEVEL</div>
           <div style="font-family:var(--font-semi);font-weight:700;font-size:16px;color:var(--text-0);margin-top:2px;">
-            ${getModLabel('floor', d.floorLevel)}
+            ${getModLabel('floor',d.floorLevel)}
             <span style="font-size:12px;font-weight:400;color:var(--text-2);">(×${appData.catalog.modifiers.floorLevel.find(m=>m.id===d.floorLevel)?.multiplier})</span>
           </div>
         </div>
         <div style="flex:1;">
           <div style="font-size:12px;color:var(--text-2);">ACCESS</div>
           <div style="font-family:var(--font-semi);font-weight:700;font-size:16px;color:var(--text-0);margin-top:2px;">
-            ${getModLabel('access', d.accessDifficulty)}
+            ${getModLabel('access',d.accessDifficulty)}
             <span style="font-size:12px;font-weight:400;color:var(--text-2);">(×${appData.catalog.modifiers.accessDifficulty.find(m=>m.id===d.accessDifficulty)?.multiplier})</span>
           </div>
         </div>
@@ -1713,51 +1946,37 @@ function renderReview() {
     </div>
 
     <!-- Line Items -->
-    <div class="section-label mb-8">${d.panes.length} Pane${d.panes.length !== 1 ? 's' : ''} — Line Items</div>
-    ${d.panes.map((p, i) => {
-      const w_in = toIn(parseFloat(p.width), p.unit);
-      const h_in = toIn(parseFloat(p.height), p.unit);
-      const r = calcPane(w_in, h_in, p.glassTypeId, d.floorLevel, d.accessDifficulty, appData.catalog);
+    <div class="section-label mb-8">${d.panes.length} Pane${d.panes.length!==1?'s':''} — Line Items</div>
+    ${d.panes.map((p,i)=>{
+      const r = calcPane(p, d.floorLevel, d.accessDifficulty, appData.catalog);
+      const label = getPaneLabel(p);
+      const qty = p.qty||1;
       return `
       <div class="card card-tight mb-8">
         <div class="flex-between mb-4">
-          <span style="font-family:var(--font-semi);font-weight:700;font-size:15px;">
-            Pane ${i+1} — ${getGlassLabel(p.glassTypeId)}
-          </span>
-          <span style="font-family:var(--font-title);font-weight:800;font-size:20px;color:var(--text-0);">${r ? fmt(r.lineTotal) : '—'}</span>
+          <div>
+            <span style="font-family:var(--font-semi);font-weight:700;font-size:15px;">Pane ${i+1}${p.location?' · '+p.location:''}</span>
+            <div style="font-size:12px;color:var(--text-2);margin-top:2px;">${label}${qty>1?' · Qty '+qty:''}</div>
+          </div>
+          <span style="font-family:var(--font-title);font-weight:800;font-size:20px;color:var(--text-0);">${r&&!r.requiresQuote?fmt(r.lineTotal):'—'}</span>
         </div>
-        <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">${p.width}" × ${p.height}" · ${r ? r.sqft.toFixed(2) : '—'} sqft</div>
+        <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">${p.width}" × ${p.height}"${r&&!r.requiresQuote?' · '+r.sqft.toFixed(2)+' sqft':''}</div>
         <div class="divider-dashed"></div>
         <div class="price-row">
-          <span class="price-row-label" style="font-size:13px;">Glass / Product</span>
-          <span class="price-row-value" style="font-size:15px;">${r ? fmt(r.productCost) : '—'}</span>
+          <span class="price-row-label" style="font-size:13px;">Glass / Product${p.gridEnabled?' (incl. grid)':''}${p.shape&&p.shape!=='standard'?' · '+p.shape.replace('_',' '):''}</span>
+          <span class="price-row-value" style="font-size:15px;">${r&&!r.requiresQuote?fmt(r.productCost):'QUOTE'}</span>
         </div>
-        <div class="price-row">
-          <span class="price-row-label" style="font-size:13px;">Labor (with modifiers)</span>
-          <span class="price-row-value" style="font-size:15px;">${r ? fmt(r.laborCost) : '—'}</span>
-        </div>
-        <div class="price-row">
-          <span class="price-row-label" style="font-size:13px;">Materials (sealant, tape, blocks)</span>
-          <span class="price-row-value" style="font-size:15px;">${r ? fmt(r.materialsCost) : '—'}</span>
-        </div>
+        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Labor</span><span class="price-row-value" style="font-size:15px;">${r&&!r.requiresQuote?fmt(r.laborCost):'—'}</span></div>
+        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Materials</span><span class="price-row-value" style="font-size:15px;">${r&&!r.requiresQuote?fmt(r.materialsCost):'—'}</span></div>
       </div>`;
     }).join('')}
 
     <!-- Totals Summary -->
-    <div class="card mt-16" style="border-color:var(--amber);background:var(--amber-bg);">
+    <div class="card mt-8" style="border-color:var(--amber);background:var(--amber-bg);">
       <div class="section-label mb-12">Job Total Breakdown</div>
-      <div class="price-row">
-        <span class="price-row-label">Total Glass / Product</span>
-        <span class="price-row-value">${fmt(jobCalc.totalProduct)}</span>
-      </div>
-      <div class="price-row">
-        <span class="price-row-label">Total Labor</span>
-        <span class="price-row-value">${fmt(jobCalc.totalLabor)}</span>
-      </div>
-      <div class="price-row">
-        <span class="price-row-label">Total Materials</span>
-        <span class="price-row-value">${fmt(jobCalc.totalMaterials)}</span>
-      </div>
+      <div class="price-row"><span class="price-row-label">Total Glass / Product</span><span class="price-row-value">${fmt(jobCalc.totalProduct)}</span></div>
+      <div class="price-row"><span class="price-row-label">Total Labor</span><span class="price-row-value">${fmt(jobCalc.totalLabor)}</span></div>
+      <div class="price-row"><span class="price-row-label">Total Materials</span><span class="price-row-value">${fmt(jobCalc.totalMaterials)}</span></div>
       <div class="price-total-row">
         <span class="price-total-label">Grand Total</span>
         <span class="price-total-value">${fmt(jobCalc.grandTotal)}</span>
@@ -1765,11 +1984,20 @@ function renderReview() {
       <p style="font-size:11px;color:var(--text-2);margin-top:10px;">Estimate before applicable taxes. Subject to final inspection.</p>
     </div>
 
-    ${!app.isOnline ? `
-    <div class="alert alert-warning mt-12">
-      <span class="alert-icon">⚠</span>
-      You are offline. This quote will be queued and synced when connected.
-    </div>` : ''}
+    <!-- Notes + Tools -->
+    <div class="card mt-12">
+      <div class="section-label mb-12">Additional Notes</div>
+      <div class="form-group mb-12">
+        <label class="form-label">Tools Required</label>
+        <input class="form-input" id="review-tools" placeholder="e.g. 6ft ladder, suction cups" value="${d.toolsRequired||''}" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Job Notes</label>
+        <textarea class="form-input" id="review-notes" placeholder="Any special conditions, instructions, or observations…" style="height:80px;padding-top:12px;resize:none;">${d.notes||''}</textarea>
+      </div>
+    </div>
+
+    ${!app.isOnline?`<div class="alert alert-warning mt-12"><span class="alert-icon">⚠</span>You are offline. This quote will be queued and synced when connected.</div>`:''}
   </div>
 
   <!-- Action Bar -->
@@ -2182,10 +2410,8 @@ function renderCustomerView(quoteId) {
   }
 
   const lineItems = q.panes.map((p, i) => {
-    const w_in = toIn(parseFloat(p.width), p.unit);
-    const h_in = toIn(parseFloat(p.height), p.unit);
-    const r = calcPane(w_in, h_in, p.glassTypeId, q.floorLevel, q.accessDifficulty, appData.catalog);
-    return { ...p, ...r, idx: i };
+    const r = calcPane(p, q.floorLevel, q.accessDifficulty, appData.catalog);
+    return { ...p, ...(r && !r.requiresQuote ? r : {}), idx: i };
   });
 
   return `
@@ -2205,10 +2431,10 @@ function renderCustomerView(quoteId) {
 
   ${lineItems.map((item, i) => `
   <div style="margin-bottom:16px;">
-    <div class="cv-label">Pane ${i+1} — ${getGlassLabel(item.glassTypeId)}</div>
-    <div class="cv-line-item"><span class="cv-line-label">${item.width}" × ${item.height}" (${item.sqft ? item.sqft.toFixed(2) : '—'} sqft)</span><span class="cv-line-value">${item.productCost ? fmt(item.productCost) : '—'}</span></div>
-    <div class="cv-line-item"><span class="cv-line-label">Labor</span><span class="cv-line-value">${item.laborCost ? fmt(item.laborCost) : '—'}</span></div>
-    <div class="cv-line-item"><span class="cv-line-label">Materials</span><span class="cv-line-value">${item.materialsCost ? fmt(item.materialsCost) : '—'}</span></div>
+    <div class="cv-label">Pane ${i+1}${item.location?' — '+item.location:''} — ${getPaneLabel(item)}${(item.qty||1)>1?' (×'+item.qty+')':''}</div>
+    <div class="cv-line-item"><span class="cv-line-label">${item.width}" × ${item.height}"${item.sqft?' ('+item.sqft.toFixed(2)+' sqft)':''}</span><span class="cv-line-value">${item.productCost?fmt(item.productCost):'QUOTE'}</span></div>
+    <div class="cv-line-item"><span class="cv-line-label">Labor</span><span class="cv-line-value">${item.laborCost?fmt(item.laborCost):'—'}</span></div>
+    <div class="cv-line-item"><span class="cv-line-label">Materials</span><span class="cv-line-value">${item.materialsCost?fmt(item.materialsCost):'—'}</span></div>
   </div>
   `).join('')}
 
@@ -2275,106 +2501,129 @@ function attachEvents() {
     navigate('home');
   });
 
-  // Customer inputs
-  on('cust-name', 'input', e => app.draft.customerName = e.target.value);
-  on('cust-contact', 'input', e => app.draft.customerContact = e.target.value);
-  on('cust-contact-type', 'change', e => app.draft.contactType = e.target.value);
+  // Job-level inputs
+  on('cust-name',         'input',  e => app.draft.customerName    = e.target.value);
+  on('cust-contact',      'input',  e => app.draft.customerContact = e.target.value);
+  on('cust-contact-type', 'change', e => app.draft.contactType     = e.target.value);
+  on('job-num',           'input',  e => app.draft.jobNum          = e.target.value);
 
-  // Glass type selection
-  delegate('[data-glass]', 'click', e => {
-    if (!app.draft) return;
-    app.draft.currentPane.glassTypeId = e.currentTarget.dataset.glass;
-    render();
-  });
+  // Pane-level text inputs (debounced re-render for price preview)
+  const debouncedRender = () => { clearTimeout(app._renderTimer); app._renderTimer = setTimeout(() => render(), 280); };
+  on('pane-location', 'input', e => { app.draft.currentPane.location = e.target.value; });
+  on('pane-width',    'input', e => { app.draft.currentPane.width  = e.target.value; debouncedRender(); });
+  on('pane-height',   'input', e => { app.draft.currentPane.height = e.target.value; debouncedRender(); });
+  on('pane-oa',       'input', e => { app.draft.currentPane.oa     = e.target.value; });
+  on('spacer-other',  'input', e => { app.draft.currentPane.spacerOther = e.target.value; });
+  on('grid-size',     'input', e => { app.draft.currentPane.gridSize  = e.target.value; });
+  on('grid-color',    'input', e => { app.draft.currentPane.gridColor = e.target.value; });
+
+  // Qty stepper
+  on('qty-dec', 'click', () => { app.draft.currentPane.qty = Math.max(1, (app.draft.currentPane.qty||1) - 1); render(); });
+  on('qty-inc', 'click', () => { app.draft.currentPane.qty = Math.min(99, (app.draft.currentPane.qty||1) + 1); render(); });
 
   // Unit toggle
   on('unit-in', 'click', () => {
-    if (app.draft.currentPane.unit !== 'in') {
-      const w = parseFloat(app.draft.currentPane.width);
-      const h = parseFloat(app.draft.currentPane.height);
-      if (w) app.draft.currentPane.width = (w * 0.393701).toFixed(1);
-      if (h) app.draft.currentPane.height = (h * 0.393701).toFixed(1);
-      app.draft.currentPane.unit = 'in';
+    const cp = app.draft.currentPane;
+    if (cp.unit !== 'in') {
+      const w = parseFloat(cp.width), h = parseFloat(cp.height);
+      if (w) cp.width  = (w * 0.393701).toFixed(1);
+      if (h) cp.height = (h * 0.393701).toFixed(1);
+      cp.unit = 'in';
       render();
     }
   });
   on('unit-cm', 'click', () => {
-    if (app.draft.currentPane.unit !== 'cm') {
-      const w = parseFloat(app.draft.currentPane.width);
-      const h = parseFloat(app.draft.currentPane.height);
-      if (w) app.draft.currentPane.width = (w / 0.393701).toFixed(1);
-      if (h) app.draft.currentPane.height = (h / 0.393701).toFixed(1);
-      app.draft.currentPane.unit = 'cm';
+    const cp = app.draft.currentPane;
+    if (cp.unit !== 'cm') {
+      const w = parseFloat(cp.width), h = parseFloat(cp.height);
+      if (w) cp.width  = (w / 0.393701).toFixed(1);
+      if (h) cp.height = (h / 0.393701).toFixed(1);
+      cp.unit = 'cm';
       render();
     }
   });
 
-  // Dimension inputs - live update for price preview
-  on('pane-width', 'input', e => {
-    app.draft.currentPane.width = e.target.value;
-    // Debounced re-render for price preview
-    clearTimeout(app._renderTimer);
-    app._renderTimer = setTimeout(() => render(), 300);
-  });
-  on('pane-height', 'input', e => {
-    app.draft.currentPane.height = e.target.value;
-    clearTimeout(app._renderTimer);
-    app._renderTimer = setTimeout(() => render(), 300);
+  // Glass spec chips
+  delegate('[data-thickness]', 'click', e => { app.draft.currentPane.thickness = e.currentTarget.dataset.thickness; render(); });
+  delegate('[data-coating]',   'click', e => { app.draft.currentPane.coating   = e.currentTarget.dataset.coating;   render(); });
+  delegate('[data-finish]',    'click', e => { app.draft.currentPane.finish    = e.currentTarget.dataset.finish;    render(); });
+  delegate('[data-spacer]',    'click', e => { app.draft.currentPane.spacer    = e.currentTarget.dataset.spacer;    render(); });
+  delegate('[data-shape]',     'click', e => { app.draft.currentPane.shape     = e.currentTarget.dataset.shape;     render(); });
+
+  // Grid toggle
+  on('grid-toggle', 'change', e => { app.draft.currentPane.gridEnabled = e.target.checked; render(); });
+
+  // Grid H/V steppers
+  delegate('[data-grid-adj]', 'click', e => {
+    const axis = e.currentTarget.dataset.gridAdj;
+    const dir  = parseInt(e.currentTarget.dataset.dir);
+    const cp   = app.draft.currentPane;
+    if (axis === 'h') cp.gridH = Math.max(0, (cp.gridH||0) + dir);
+    if (axis === 'v') cp.gridV = Math.max(0, (cp.gridV||0) + dir);
+    render();
   });
 
   // Floor/access modifiers
-  delegate('[data-floor]', 'click', e => {
-    app.draft.floorLevel = e.currentTarget.dataset.floor;
-    render();
-  });
-  delegate('[data-access]', 'click', e => {
-    app.draft.accessDifficulty = e.currentTarget.dataset.access;
+  delegate('[data-floor]',  'click', e => { app.draft.floorLevel      = e.currentTarget.dataset.floor;  render(); });
+  delegate('[data-access]', 'click', e => { app.draft.accessDifficulty = e.currentTarget.dataset.access; render(); });
+
+  // Pane tab — switch to new
+  on('pane-tab-new', 'click', () => {
+    app.draft.editingPaneIdx = null;
+    app.draft.currentPane = freshPane(app.draft.currentPane);
     render();
   });
 
-  // Add pane
+  // Pane tab — edit existing
+  delegate('[data-edit-pane-idx]', 'click', e => {
+    const idx = parseInt(e.currentTarget.dataset.editPaneIdx);
+    app.draft.editingPaneIdx = idx;
+    app.draft.currentPane = { ...app.draft.panes[idx] };
+    render();
+  });
+
+  // Add pane / Update pane
   on('add-pane-btn', 'click', () => {
-    if (app.draft.panes.length >= 20) {
-      alert('Maximum 20 panes per quote.');
+    const d  = app.draft;
+    const cp = d.currentPane;
+    const isEditing = d.editingPaneIdx !== null && d.editingPaneIdx !== undefined;
+
+    if (isEditing) {
+      // Update existing pane in place
+      d.panes[d.editingPaneIdx] = { id: d.panes[d.editingPaneIdx].id, ...cp };
+      d.editingPaneIdx = null;
+      d.currentPane = freshPane(cp);
+      render();
       return;
     }
-    const cp = app.draft.currentPane;
-    if (!cp.glassTypeId || !cp.width || !cp.height) return;
-    app.draft.panes.push({
-      id: genPaneId(),
-      glassTypeId: cp.glassTypeId,
-      width: cp.width,
-      height: cp.height,
-      unit: cp.unit,
-    });
-    // Reset current pane form (keep glass type selected for convenience)
-    app.draft.currentPane = { glassTypeId: cp.glassTypeId, width: '', height: '', unit: cp.unit };
+
+    if (d.panes.length >= 20) { alert('Maximum 20 panes per quote.'); return; }
+    d.panes.push({ id: genPaneId(), ...cp });
+    d.currentPane = freshPane(cp);
     render();
   });
 
-  // Review quote (from step 1)
+  // Review quote (from step 1) — auto-add current pane if complete
   on('review-quote-btn', 'click', () => {
-    // If current pane has data, add it first
-    const cp = app.draft.currentPane;
-    if (cp.glassTypeId && cp.width && cp.height && parseFloat(cp.width) > 0 && parseFloat(cp.height) > 0) {
-      app.draft.panes.push({
-        id: genPaneId(),
-        glassTypeId: cp.glassTypeId,
-        width: cp.width,
-        height: cp.height,
-        unit: cp.unit,
-      });
-      app.draft.currentPane = { glassTypeId: null, width: '', height: '', unit: cp.unit };
+    const d  = app.draft;
+    const cp = d.currentPane;
+    const isEditing = d.editingPaneIdx !== null && d.editingPaneIdx !== undefined;
+    if (!isEditing && cp.thickness && cp.coating && cp.finish &&
+        parseFloat(cp.width) > 0 && parseFloat(cp.height) > 0) {
+      const r = draftCurrentPaneCalc();
+      if (r && !r.requiresQuote) {
+        d.panes.push({ id: genPaneId(), ...cp });
+        d.currentPane = freshPane(cp);
+        d.editingPaneIdx = null;
+      }
     }
-    if (app.draft.panes.length === 0) return;
-    app.draft.step = 2;
+    if (d.panes.length === 0) return;
+    d.step = 2;
     navigate('new-quote');
   });
 
-  // Flag large pane
+  // Flag for office review
   on('flag-large-pane', 'click', () => {
-    const d = app.draft;
-    const jobCalc = draftJobCalc();
     const finalQuote = finalizeDraft('flagged');
     navigate('sent', { quoteId: finalQuote.id });
   });
@@ -2385,6 +2634,8 @@ function attachEvents() {
     navigate('new-quote');
   });
   on('add-another-pane-btn', 'click', () => {
+    app.draft.editingPaneIdx = null;
+    app.draft.currentPane = freshPane(app.draft.currentPane);
     app.draft.step = 1;
     navigate('new-quote');
   });
@@ -2395,6 +2646,7 @@ function attachEvents() {
   delegate('[data-remove-pane]', 'click', e => {
     const pid = e.currentTarget.dataset.removePane;
     app.draft.panes = app.draft.panes.filter(p => p.id !== pid);
+    if (app.draft.editingPaneIdx !== null) app.draft.editingPaneIdx = null;
     if (app.draft.panes.length === 0) {
       app.draft.step = 1;
       navigate('new-quote');
@@ -2409,8 +2661,10 @@ function attachEvents() {
     navigate('new-quote');
   });
 
+  on('review-tools', 'input', e => { if (app.draft) app.draft.toolsRequired = e.target.value; });
+  on('review-notes', 'input', e => { if (app.draft) app.draft.notes = e.target.value; });
+
   on('show-customer-btn', 'click', () => {
-    // Show presentation mode
     app.customerViewOpen = true;
     app.customerViewQuoteId = '__draft__';
     render();
@@ -2575,6 +2829,9 @@ function finalizeDraft(status) {
     customerContact: d.customerContact,
     contactType: d.contactType,
     jobDate: d.jobDate,
+    jobNum: d.jobNum || '',
+    notes: d.notes || '',
+    toolsRequired: d.toolsRequired || '',
     status: status,
     floorLevel: d.floorLevel,
     accessDifficulty: d.accessDifficulty,
@@ -2609,10 +2866,14 @@ function viewQuoteFromHistory(quoteId) {
     customerContact: q.customerContact || '',
     contactType: q.contactType || 'phone',
     jobDate: q.jobDate,
+    jobNum: q.jobNum || '',
+    notes: q.notes || '',
+    toolsRequired: q.toolsRequired || '',
     floorLevel: q.floorLevel,
     accessDifficulty: q.accessDifficulty,
     panes: q.panes,
-    currentPane: { glassTypeId: null, width: '', height: '', unit: 'in' },
+    currentPane: freshPane(),
+    editingPaneIdx: null,
     step: 3,
     catalogVersion: q.catalogVersion,
     status: q.status,
