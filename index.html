@@ -2559,18 +2559,33 @@ function attachEvents() {
   delegate('[data-supplier]',   'click', e => { app.draft.supplier   = e.currentTarget.dataset.supplier;   render(); });
   delegate('[data-difficulty]', 'click', e => { app.draft.difficulty = e.currentTarget.dataset.difficulty; render(); });
 
-  // Pane tab — switch to new
+  // Pane tab — switch to new (auto-save current edits first if valid)
   on('pane-tab-new', 'click', () => {
-    app.draft.editingPaneIdx = null;
-    app.draft.currentPane = freshPane(app.draft.currentPane);
+    const d = app.draft;
+    if (d.editingPaneIdx !== null && d.editingPaneIdx !== undefined) {
+      const cp = d.currentPane;
+      if (parseFloat(cp.width) > 0 && parseFloat(cp.height) > 0) {
+        d.panes[d.editingPaneIdx] = { id: d.panes[d.editingPaneIdx].id, ...cp };
+      }
+    }
+    d.editingPaneIdx = null;
+    d.currentPane = freshPane(d.currentPane);
     render();
   });
 
-  // Pane tab — edit existing
+  // Pane tab — edit existing (auto-save current edits first if valid)
   delegate('[data-edit-pane-idx]', 'click', e => {
+    const d = app.draft;
     const idx = parseInt(e.currentTarget.dataset.editPaneIdx);
-    app.draft.editingPaneIdx = idx;
-    app.draft.currentPane = { ...app.draft.panes[idx] };
+    if (idx === d.editingPaneIdx) return; // already editing this pane
+    if (d.editingPaneIdx !== null && d.editingPaneIdx !== undefined) {
+      const cp = d.currentPane;
+      if (parseFloat(cp.width) > 0 && parseFloat(cp.height) > 0) {
+        d.panes[d.editingPaneIdx] = { id: d.panes[d.editingPaneIdx].id, ...cp };
+      }
+    }
+    d.editingPaneIdx = idx;
+    d.currentPane = JSON.parse(JSON.stringify(d.panes[idx])); // deep clone — no reference sharing
     render();
   });
 
