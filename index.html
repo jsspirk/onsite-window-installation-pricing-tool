@@ -1167,7 +1167,7 @@ const SAMPLE_QUOTES = [
       { id: 'p1', thickness: '1/4"', coating: 'c270', finish: 'annealed', spacer: 'grey',
         gridEnabled: false, gridH: 0, gridV: 0, gridSize: '', gridColor: '',
         shape: 'standard', location: 'Living Rm', qty: 1,
-        oa: '', width: 36, height: 48, unit: 'in' }
+        width: 36, height: 48, unit: 'in' }
     ],
     totalProduct: 0, totalLabor: 0, totalMaterials: 0, grandTotal: 0,
     catalogVersion: 1,
@@ -1191,7 +1191,7 @@ const SAMPLE_QUOTES = [
       { id: 'p1', thickness: '1/8"', coating: 'clear', finish: 'tempered', spacer: 'mill',
         gridEnabled: true, gridH: 2, gridV: 3, gridSize: '5/8"', gridColor: 'White',
         shape: 'standard', location: 'Master BR', qty: 2,
-        oa: '', width: 24, height: 36, unit: 'in' },
+        width: 24, height: 36, unit: 'in' },
     ],
     totalProduct: 0, totalLabor: 0, totalMaterials: 0, grandTotal: 0,
     catalogVersion: 1,
@@ -1378,7 +1378,6 @@ function freshPane(from) {
     shape:    'standard',
     location: '',
     qty:      1,
-    oa:       '',
     width:    '',
     height:   '',
     unit:     from?.unit || 'in',
@@ -1707,7 +1706,7 @@ function renderNewQuoteStep1() {
         </div>
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:8px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
         <div class="form-group">
           <label class="form-label">Width (${cp.unit})</label>
           <input class="form-input form-input-large" id="pane-width" type="number" inputmode="decimal" placeholder="0" value="${cp.width}" min="1" max="300" />
@@ -1715,10 +1714,6 @@ function renderNewQuoteStep1() {
         <div class="form-group">
           <label class="form-label">Height (${cp.unit})</label>
           <input class="form-input form-input-large" id="pane-height" type="number" inputmode="decimal" placeholder="0" value="${cp.height}" min="1" max="300" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">OA (${cp.unit})</label>
-          <input class="form-input form-input-large" id="pane-oa" type="number" inputmode="decimal" placeholder="—" value="${cp.oa||''}" min="1" max="300" />
         </div>
       </div>
       <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
@@ -2510,7 +2505,6 @@ function attachEvents() {
   on('pane-location', 'input', e => { app.draft.currentPane.location = e.target.value; });
   on('pane-width',    'input', e => { app.draft.currentPane.width  = e.target.value; debouncedRender(); });
   on('pane-height',   'input', e => { app.draft.currentPane.height = e.target.value; debouncedRender(); });
-  on('pane-oa',       'input', e => { app.draft.currentPane.oa     = e.target.value; });
   on('spacer-other',  'input', e => { app.draft.currentPane.spacerOther = e.target.value; });
   on('grid-size',     'input', e => { app.draft.currentPane.gridSize  = e.target.value; });
   on('grid-color',    'input', e => { app.draft.currentPane.gridColor = e.target.value; });
