@@ -305,6 +305,9 @@
     .input-hint { font-size: 12px; color: var(--text-2); }
     .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    /* Stack to single column on narrow mobile, side-by-side on wider screens */
+    .form-row-stack { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 480px) { .form-row-stack { grid-template-columns: 1fr 1fr; } }
 
     /* Chip selector */
     .chip-group { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -1636,7 +1639,7 @@ function renderNewQuoteStep1() {
         <span style="font-size:13px;color:var(--text-2);">${today}</span>
         <span style="font-size:13px;color:var(--text-2);">${app.currentUser?.name||''}</span>
       </div>
-      <div class="form-row mb-12">
+      <div class="form-row-stack mb-12">
         <div class="form-group">
           <label class="form-label">Customer</label>
           <input class="form-input" id="cust-name" placeholder="Name or company" value="${d.customerName}" />
@@ -1646,7 +1649,7 @@ function renderNewQuoteStep1() {
           <input class="form-input" id="job-num" placeholder="Optional" value="${d.jobNum||''}" />
         </div>
       </div>
-      <div class="form-row">
+      <div class="form-row-stack">
         <div class="form-group">
           <label class="form-label">Contact</label>
           <input class="form-input" id="cust-contact" placeholder="Phone or email" value="${d.customerContact}" />
