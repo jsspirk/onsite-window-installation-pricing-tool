@@ -2558,33 +2558,21 @@ function attachEvents() {
   delegate('[data-supplier]',   'click', e => { app.draft.supplier   = e.currentTarget.dataset.supplier;   render(); });
   delegate('[data-difficulty]', 'click', e => { app.draft.difficulty = e.currentTarget.dataset.difficulty; render(); });
 
-  // Pane tab — switch to new (auto-save current edits first if valid)
+  // Pane tab — switch to new (discard in-progress edits, do NOT auto-save)
   on('pane-tab-new', 'click', () => {
     const d = app.draft;
-    if (d.editingPaneIdx !== null && d.editingPaneIdx !== undefined) {
-      const cp = d.currentPane;
-      if (parseFloat(cp.width) > 0 && parseFloat(cp.height) > 0) {
-        d.panes[d.editingPaneIdx] = { id: d.panes[d.editingPaneIdx].id, ...cp };
-      }
-    }
     d.editingPaneIdx = null;
     d.currentPane = freshPane(d.currentPane);
     render();
   });
 
-  // Pane tab — edit existing (auto-save current edits first if valid)
+  // Pane tab — edit existing (discard in-progress edits, do NOT auto-save)
   delegate('[data-edit-pane-idx]', 'click', e => {
     const d = app.draft;
     const idx = parseInt(e.currentTarget.dataset.editPaneIdx);
-    if (idx === d.editingPaneIdx) return; // already editing this pane
-    if (d.editingPaneIdx !== null && d.editingPaneIdx !== undefined) {
-      const cp = d.currentPane;
-      if (parseFloat(cp.width) > 0 && parseFloat(cp.height) > 0) {
-        d.panes[d.editingPaneIdx] = { id: d.panes[d.editingPaneIdx].id, ...cp };
-      }
-    }
+    if (idx === d.editingPaneIdx) return; // already on this pane, no-op
     d.editingPaneIdx = idx;
-    d.currentPane = JSON.parse(JSON.stringify(d.panes[idx])); // deep clone — no reference sharing
+    d.currentPane = JSON.parse(JSON.stringify(d.panes[idx])); // deep clone — guaranteed no reference sharing
     render();
   });
 
@@ -2829,7 +2817,7 @@ function viewQuoteFromHistory(quoteId) {
     toolsRequired: q.toolsRequired || '',
     supplier: q.supplier || 'busick',
     difficulty: q.difficulty || 'easy',
-    panes: q.panes,
+    panes: JSON.parse(JSON.stringify(q.panes)), // deep clone — prevent draft edits from corrupting saved quote
     currentPane: freshPane(),
     editingPaneIdx: null,
     step: 3,
