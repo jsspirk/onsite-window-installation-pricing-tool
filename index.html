@@ -1729,7 +1729,7 @@ function renderNewQuoteStep1() {
 
       <div class="section-label mb-8">Thickness</div>
       <div class="chip-group mb-16">
-        ${THICKNESS_OPTS.map(t=>`<div class="chip ${cp.thickness===t?'active':''}" data-thickness="${t}">${t}</div>`).join('')}
+        ${THICKNESS_OPTS.map(t=>`<div class="chip ${cp.thickness===t?'active':''}" data-thickness="${t.replace(/"/g,'&quot;')}">${t}</div>`).join('')}
       </div>
 
       <div class="section-label mb-8">Coating / Low-E</div>
