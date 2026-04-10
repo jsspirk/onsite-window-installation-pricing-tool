@@ -2573,21 +2573,22 @@ function attachEvents() {
     return keys.some(k => String(cp[k]) !== String(stored[k]));
   };
 
-  // Prompts user if there are unsaved changes; saves if confirmed. Returns false if user cancels.
+  // If currentPane has unsaved edits, prompt the user.
+  // Returns true (proceed with switch) or false (stay on current pane).
   const confirmPaneSwitch = () => {
     if (!hasUnsavedPaneChanges()) return true;
-    const choice = confirm('You have unsaved changes to this pane. Save before switching?');
-    if (choice) {
+    const save = confirm('You have unsaved changes to this pane.\n\nTap OK to save and switch, or Cancel to stay.');
+    if (save) {
       const d = app.draft;
       d.panes[d.editingPaneIdx] = { id: d.panes[d.editingPaneIdx].id, ...d.currentPane };
     }
-    return true; // always allow switch — either saved or discarded
+    return save; // false = stay on current pane, caller must bail
   };
 
   // Pane tab — switch to new
   on('pane-tab-new', 'click', () => {
+    if (!confirmPaneSwitch()) return; // user chose to stay
     const d = app.draft;
-    confirmPaneSwitch();
     d.editingPaneIdx = null;
     d.currentPane = freshPane(d.currentPane);
     render();
@@ -2597,8 +2598,8 @@ function attachEvents() {
   delegate('[data-edit-pane-idx]', 'click', e => {
     const d = app.draft;
     const idx = parseInt(e.currentTarget.dataset.editPaneIdx);
-    if (idx === d.editingPaneIdx) return; // already on this pane, no-op
-    confirmPaneSwitch();
+    if (idx === d.editingPaneIdx) return; // already on this pane
+    if (!confirmPaneSwitch()) return; // user chose to stay
     d.editingPaneIdx = idx;
     d.currentPane = JSON.parse(JSON.stringify(d.panes[idx]));
     render();
