@@ -1661,20 +1661,6 @@ function renderNewQuoteStep1() {
       </div>
     </div>
 
-    <!-- SUPPLIER + DIFFICULTY -->
-    <div class="section-label mb-8">Supplier</div>
-    <div class="chip-group mb-12">
-      ${SUPPLIER_OPTS.map(s=>`
-        <div class="chip ${d.supplier===s.id?'active':''}" data-supplier="${s.id}">${s.name}</div>`).join('')}
-    </div>
-    <div class="section-label mb-8">Job Difficulty</div>
-    <div class="chip-group mb-16">
-      ${DIFFICULTY_OPTS.map(o=>`
-        <div class="chip ${d.difficulty===o.id?'active':''}" data-difficulty="${o.id}">
-          ${o.label}<span style="font-size:11px;opacity:0.7;"> ${o.sub}</span>
-        </div>`).join('')}
-    </div>
-
     <!-- PANE TABS -->
     ${d.panes.length>0?`
     <div class="pane-tab-strip">
@@ -1785,10 +1771,23 @@ function renderNewQuoteStep1() {
       </div>`:'<div style="margin-bottom:16px;"></div>'}
 
       <div class="section-label mb-8">Shape</div>
-      <div class="chip-group mb-4">
+      <div class="chip-group mb-16">
         ${SHAPE_OPTS.map(s=>`
           <div class="chip ${cp.shape===s.id?'active':''}" data-shape="${s.id}">
             ${s.label}${s.id!=='standard'?` <span style="font-size:11px;opacity:0.8;">×${PRICE_CATALOG.shapeMultipliers[s.id]}</span>`:''}
+          </div>`).join('')}
+      </div>
+
+      <div class="section-label mb-8">Supplier</div>
+      <div class="chip-group mb-12">
+        ${SUPPLIER_OPTS.map(s=>`
+          <div class="chip ${d.supplier===s.id?'active':''}" data-supplier="${s.id}">${s.name}</div>`).join('')}
+      </div>
+      <div class="section-label mb-8">Job Difficulty</div>
+      <div class="chip-group mb-4">
+        ${DIFFICULTY_OPTS.map(o=>`
+          <div class="chip ${d.difficulty===o.id?'active':''}" data-difficulty="${o.id}">
+            ${o.label}<span style="font-size:11px;opacity:0.7;"> ${o.sub}</span>
           </div>`).join('')}
       </div>
     </div>
