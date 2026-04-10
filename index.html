@@ -2487,35 +2487,38 @@ function attachEvents() {
   on('cust-contact-type', 'change', e => app.draft.contactType     = e.target.value);
   on('job-num',           'input',  e => app.draft.jobNum          = e.target.value);
 
-  // Pane-level text inputs — debounced render that restores focus after DOM rebuild
-  const debouncedRender = () => {
+  // Deferred render for price preview — fires only after the user has stopped interacting
+  const deferredRender = () => {
     clearTimeout(app._renderTimer);
-    app._renderTimer = setTimeout(() => {
-      const activeId  = document.activeElement?.id;
-      const selStart  = document.activeElement?.selectionStart;
-      const selEnd    = document.activeElement?.selectionEnd;
-      render();
-      if (activeId) {
-        const el = document.getElementById(activeId);
-        if (el) {
-          el.focus();
-          if (selStart !== undefined && selEnd !== undefined) {
-            try { el.setSelectionRange(selStart, selEnd); } catch {}
-          }
-        }
-      }
-    }, 800);
+    app._renderTimer = setTimeout(() => render(), 600);
   };
-  on('pane-location', 'input', e => { app.draft.currentPane.location = e.target.value; });
-  on('pane-width',    'input', e => { app.draft.currentPane.width  = e.target.value; debouncedRender(); });
-  on('pane-height',   'input', e => { app.draft.currentPane.height = e.target.value; debouncedRender(); });
-  on('spacer-other',  'input', e => { app.draft.currentPane.spacerOther = e.target.value; });
-  on('grid-size',     'input', e => { app.draft.currentPane.gridSize  = e.target.value; });
-  on('grid-color',    'input', e => { app.draft.currentPane.gridColor = e.target.value; });
 
-  // Qty stepper
-  on('qty-dec', 'click', () => { app.draft.currentPane.qty = Math.max(1, (app.draft.currentPane.qty||1) - 1); render(); });
-  on('qty-inc', 'click', () => { app.draft.currentPane.qty = Math.min(99, (app.draft.currentPane.qty||1) + 1); render(); });
+  on('pane-location', 'input',  e => { app.draft.currentPane.location = e.target.value; });
+  // Width/height: update state on every keystroke, trigger render only on blur/Enter (change event)
+  // This prevents any mid-typing DOM rebuilds that cause flash and cursor loss
+  on('pane-width',    'input',  e => { app.draft.currentPane.width  = e.target.value; });
+  on('pane-height',   'input',  e => { app.draft.currentPane.height = e.target.value; });
+  on('pane-width',    'change', e => { app.draft.currentPane.width  = e.target.value; deferredRender(); });
+  on('pane-height',   'change', e => { app.draft.currentPane.height = e.target.value; deferredRender(); });
+  on('spacer-other',  'input',  e => { app.draft.currentPane.spacerOther = e.target.value; });
+  on('grid-size',     'input',  e => { app.draft.currentPane.gridSize  = e.target.value; });
+  on('grid-color',    'input',  e => { app.draft.currentPane.gridColor = e.target.value; });
+
+  // Qty stepper — update span directly to avoid full DOM rebuild flash
+  on('qty-dec', 'click', () => {
+    const cp = app.draft.currentPane;
+    cp.qty = Math.max(1, (cp.qty||1) - 1);
+    const el = document.getElementById('qty-val');
+    if (el) el.textContent = cp.qty;
+    deferredRender();
+  });
+  on('qty-inc', 'click', () => {
+    const cp = app.draft.currentPane;
+    cp.qty = Math.min(99, (cp.qty||1) + 1);
+    const el = document.getElementById('qty-val');
+    if (el) el.textContent = cp.qty;
+    deferredRender();
+  });
 
   // Unit toggle
   on('unit-in', 'click', () => {
