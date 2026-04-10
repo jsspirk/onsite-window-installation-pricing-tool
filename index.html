@@ -1093,58 +1093,53 @@
 const APP_VERSION = '1.1.0';
 const MAX_PANE_SIZE_IN = 120; // inches — trigger large-pane warning
 
-// Glass cost matrix ($/sqft, glass cost only — Busick price sheet 3.1.26)
-// null = requires custom quote, flag for office review
-const GLASS_MATRIX = {
-  '1/8"': {
-    clear:    { annealed: 7.72,  tempered: 11.97 },
-    hardcoat: { annealed: null,  tempered: null   },
-    c180:     { annealed: null,  tempered: null   },
-    c270:     { annealed: 12.01, tempered: 18.53  },
-    c360:     { annealed: 13.90, tempered: 20.39  },
+// FastGlass pricing engine — sourced from COST CALCULATOR 2.27.2026 (CURRENT).xlsx
+// Formula: sellPrice = SF × (rawRate + gridAdder) × markup × shapeMult × 3 + laborHrs × laborRate
+// null = requires custom quote (not in supplier price sheet)
+const PRICE_CATALOG = {
+  version: '2026-03-01',
+  laborRate: 200,            // $/hr — update when rate changes
+  suppliers: {
+    busick:    { name: 'Busick',    markup: 1.25,  gridAdder: 5.00  },
+    glaz_tech: { name: 'Glaz-Tech', markup: 1.275, gridAdder: 3.75  },
+    oldcastle: { name: 'Oldcastle', markup: 1.15,  gridAdder: 2.50  },
   },
-  '3/16"': {
-    clear:    { annealed: 8.66,  tempered: 13.00  },
-    hardcoat: { annealed: null,  tempered: null   },
-    c180:     { annealed: null,  tempered: null   },
-    c270:     { annealed: 13.98, tempered: 19.24  },
-    c360:     { annealed: 15.40, tempered: 22.40  },
+  // Raw $/SF from supplier price sheets (pre-markup). Key: `${coating}_${finish}`
+  rates: {
+    busick: {
+      '1/8"':  { clear_ann: 7.72,  clear_temp: 11.97, c270_ann: 12.01, c270_temp: 18.53, c360_ann: 13.90, c360_temp: 20.39 },
+      '3/16"': { clear_ann: 8.66,  clear_temp: 13.00, c270_ann: 13.98, c270_temp: 19.24, c360_ann: 15.40, c360_temp: 22.40 },
+      '1/4"':  { clear_ann: 8.66,  clear_temp: 13.00, c270_ann: 13.98, c270_temp: 19.24, c360_ann: null,  c360_temp: null  },
+    },
+    glaz_tech: {
+      '1/8"':  { clear_ann: 9.95,  clear_temp: 11.04, c270_ann: 12.21, c270_temp: 13.75, c360_ann: 13.89, c360_temp: 15.50 },
+      '3/16"': { clear_ann: 11.82, clear_temp: 14.22, c270_ann: 12.88, c270_temp: 16.58, c360_ann: 15.52, c360_temp: 17.67 },
+      '1/4"':  { clear_ann: 11.94, clear_temp: 14.35, c270_ann: 14.13, c270_temp: 17.76, c360_ann: 15.85, c360_temp: 18.41 },
+    },
+    oldcastle: {
+      '1/8"':  { clear_ann: 8.40,  clear_temp: 10.64, c270_ann: 11.82, c270_temp: 14.06, c360_ann: 13.27, c360_temp: 15.79 },
+      '3/16"': { clear_ann: 9.80,  clear_temp: 12.04, c270_ann: 14.78, c270_temp: 17.02, c360_ann: null,  c360_temp: 17.78 },
+      '1/4"':  { clear_ann: 8.04,  clear_temp:  9.50, c270_ann: 10.51, c270_temp: 12.54, c360_ann: 12.25, c360_temp: 14.25 },
+    },
   },
-  '1/4"': {
-    clear:    { annealed: 8.66,  tempered: 13.00  },
-    hardcoat: { annealed: null,  tempered: null   },
-    c180:     { annealed: null,  tempered: null   },
-    c270:     { annealed: 13.98, tempered: 19.24  },
-    c360:     { annealed: 13.39, tempered: 19.48  },
+  shapeMultipliers: {
+    standard:      1.00,
+    single_slope:  1.30,
+    double_slope:  1.40,
+    radius:        1.50,
+    patterns:      1.50,
+    parallelogram: 2.00,
+    circle:        2.00,
+    octagon:       2.00,
+    triple_pane:   1.75,
+    super_spacer:  1.25,
   },
+  laborDifficulty: { easy: 1, medium: 2, hard: 3 },
 };
-const GRID_UPCHARGE = 50.00; // flat $ per unit when grid is enabled
-const SHAPE_MULTIPLIERS = { standard: 1.0, single_slope: 1.3, double_slope: 1.4, radius: 1.5 };
 
 const DEFAULT_CATALOG = {
   version: 1,
   lastUpdated: new Date().toISOString(),
-  glassTypes: [], // legacy — pricing now in GLASS_MATRIX
-  laborRate: {
-    baseRatePerPane: 85.00,
-    effectiveDate: new Date().toISOString(),
-  },
-  modifiers: {
-    floorLevel: [
-      { id: 'ground', label: 'Ground',  sublabel: 'Floor 1', multiplier: 1.00 },
-      { id: 'second', label: '2nd Fl.',  sublabel: 'Floor 2', multiplier: 1.15 },
-      { id: 'third',  label: '3rd+ Fl.', sublabel: 'Floor 3+', multiplier: 1.30 },
-    ],
-    accessDifficulty: [
-      { id: 'standard',   label: 'Standard',   sublabel: 'Normal access',    multiplier: 1.00 },
-      { id: 'ladder',     label: 'Ladder Req.', sublabel: 'Ladder required',  multiplier: 1.10 },
-      { id: 'restricted', label: 'Restricted', sublabel: 'Difficult access',  multiplier: 1.20 },
-    ],
-  },
-  materialsRate: {
-    costPerLinearInch: 0.065,
-    effectiveDate: new Date().toISOString(),
-  },
 };
 
 const DEFAULT_USERS = [
@@ -1163,8 +1158,8 @@ const SAMPLE_QUOTES = [
     contactType: 'phone',
     jobDate: new Date(Date.now() - 86400000 * 2).toISOString(),
     status: 'sent',
-    floorLevel: 'ground',
-    accessDifficulty: 'standard',
+    supplier: 'busick',
+    difficulty: 'easy',
     jobNum: '',
     notes: '',
     toolsRequired: '',
@@ -1187,8 +1182,8 @@ const SAMPLE_QUOTES = [
     contactType: 'email',
     jobDate: new Date(Date.now() - 86400000 * 5).toISOString(),
     status: 'sent',
-    floorLevel: 'second',
-    accessDifficulty: 'ladder',
+    supplier: 'busick',
+    difficulty: 'medium',
     jobNum: 'EST-2041',
     notes: 'Both windows same size. Second floor bedroom.',
     toolsRequired: '6ft ladder',
@@ -1252,55 +1247,58 @@ const app = {
 
 /* ================================================================
    PRICING ENGINE
+   Formula: sellPrice = SF × (rawRate + gridAdder) × markup × shapeMult × 3 + laborHrs × $200
+   Verified 8/8 against COST CALCULATOR 2.27.2026 (CURRENT).xlsx ROM SELL-AT sheet
 ================================================================ */
-function calcPane(pane, floorModId, accessModId, catalog) {
-  const qty = pane.qty || 1;
+function calcPane(pane, supplier, difficulty) {
   const w_in = pane.unit === 'cm' ? parseFloat(pane.width) * 0.393701 : parseFloat(pane.width);
   const h_in = pane.unit === 'cm' ? parseFloat(pane.height) * 0.393701 : parseFloat(pane.height);
   if (!w_in || !h_in || w_in <= 0 || h_in <= 0) return null;
+  if (!pane.thickness || !pane.coating || !pane.finish) return null;
 
-  const floorMod = catalog.modifiers.floorLevel.find(m => m.id === floorModId) || catalog.modifiers.floorLevel[0];
-  const accessMod = catalog.modifiers.accessDifficulty.find(m => m.id === accessModId) || catalog.modifiers.accessDifficulty[0];
-  const perimeter = 2 * (w_in + h_in);
-  const sqft1 = (w_in * h_in) / 144; // sqft per unit
-  const laborCost = catalog.laborRate.baseRatePerPane * floorMod.multiplier * accessMod.multiplier * qty;
-  const materialsCost = +(perimeter * catalog.materialsRate.costPerLinearInch * qty).toFixed(2);
+  const qty      = pane.qty || 1;
+  const SF       = (w_in * h_in) / 144;
+  const rateKey  = `${pane.coating}_${pane.finish}`;     // e.g. 'c270_ann'
+  const sup      = PRICE_CATALOG.suppliers[supplier] || PRICE_CATALOG.suppliers.busick;
+  const rawRate  = PRICE_CATALOG.rates[supplier]?.[pane.thickness]?.[rateKey];
 
-  // New format: thickness/coating/finish
-  if (pane.thickness && pane.coating && pane.finish) {
-    const costPerSqft = GLASS_MATRIX[pane.thickness]?.[pane.coating]?.[pane.finish];
-    if (costPerSqft === null || costPerSqft === undefined) return { requiresQuote: true };
-    const shapeMult = SHAPE_MULTIPLIERS[pane.shape] || 1.0;
-    const gridUpcharge = pane.gridEnabled ? GRID_UPCHARGE : 0;
-    const productCost = +((sqft1 * costPerSqft * shapeMult + gridUpcharge) * qty).toFixed(2);
-    const lineTotal = +(productCost + materialsCost + laborCost).toFixed(2);
-    return {
-      sqft: +(sqft1 * qty).toFixed(4),
-      productCost, materialsCost, laborCost, lineTotal,
-      requiresQuote: false,
-    };
-  }
+  if (rawRate === null || rawRate === undefined) return { requiresQuote: true };
 
-  return null;
+  const gridAdder   = pane.gridEnabled ? sup.gridAdder : 0;
+  const shapeMult   = PRICE_CATALOG.shapeMultipliers[pane.shape] || 1.0;
+  const glassCost   = SF * (rawRate + gridAdder) * sup.markup * shapeMult;
+  const laborHrs    = PRICE_CATALOG.laborDifficulty[difficulty] || 1;
+  const laborCost   = laborHrs * PRICE_CATALOG.laborRate;
+  const productCost = +(glassCost * 3 * qty).toFixed(2);  // glass sell price (3× cost)
+  const laborTotal  = +(laborCost * qty).toFixed(2);
+  const lineTotal   = +(productCost + laborTotal).toFixed(2);
+
+  return {
+    sqft:          +(SF * qty).toFixed(4),
+    productCost,
+    laborCost:     laborTotal,
+    materialsCost: 0,
+    lineTotal,
+    requiresQuote: false,
+  };
 }
 
-function calcJob(panes, floorModId, accessModId, catalog) {
-  let totalProduct = 0, totalLabor = 0, totalMaterials = 0;
+function calcJob(panes, supplier, difficulty) {
+  let totalProduct = 0, totalLabor = 0;
   const lineItems = panes.map(p => {
-    const r = calcPane(p, floorModId, accessModId, catalog);
+    const r = calcPane(p, supplier, difficulty);
     if (!r || r.requiresQuote) return null;
     totalProduct += r.productCost;
-    totalLabor += r.laborCost;
-    totalMaterials += r.materialsCost;
+    totalLabor   += r.laborCost;
     return { ...p, ...r };
   }).filter(Boolean);
-  const grandTotal = totalProduct + totalLabor + totalMaterials;
+  const grandTotal = totalProduct + totalLabor;
   return {
     lineItems,
-    totalProduct: +totalProduct.toFixed(2),
-    totalLabor: +totalLabor.toFixed(2),
-    totalMaterials: +totalMaterials.toFixed(2),
-    grandTotal: +grandTotal.toFixed(2),
+    totalProduct:   +totalProduct.toFixed(2),
+    totalLabor:     +totalLabor.toFixed(2),
+    totalMaterials: 0,
+    grandTotal:     +grandTotal.toFixed(2),
   };
 }
 
@@ -1345,10 +1343,12 @@ function getPaneLabel(pane) {
   const parts = [pane.thickness, coatingMap[pane.coating], finishMap[pane.finish]].filter(Boolean);
   return parts.join(' · ');
 }
-function getModLabel(type, id) {
-  const arr = type === 'floor' ? appData.catalog.modifiers.floorLevel : appData.catalog.modifiers.accessDifficulty;
-  const m = arr.find(x => x.id === id);
-  return m ? m.label : id;
+function getSupplierName(supplierId) {
+  return PRICE_CATALOG.suppliers[supplierId]?.name || supplierId;
+}
+function getDifficultyLabel(difficulty) {
+  const hrs = PRICE_CATALOG.laborDifficulty[difficulty] || 1;
+  return `${difficulty.charAt(0).toUpperCase() + difficulty.slice(1)} — ${hrs}hr`;
 }
 function isLargePaneWarning(w_in, h_in) {
   return w_in > MAX_PANE_SIZE_IN || h_in > MAX_PANE_SIZE_IN;
@@ -1394,8 +1394,8 @@ function newDraft() {
     jobNum: '',
     notes: '',
     toolsRequired: '',
-    floorLevel: 'ground',
-    accessDifficulty: 'standard',
+    supplier: 'busick',
+    difficulty: 'easy',
     panes: [],
     currentPane: freshPane(),
     editingPaneIdx: null,
@@ -1407,13 +1407,13 @@ function newDraft() {
 
 function draftJobCalc() {
   if (!app.draft || app.draft.panes.length === 0) return null;
-  return calcJob(app.draft.panes, app.draft.floorLevel, app.draft.accessDifficulty, appData.catalog);
+  return calcJob(app.draft.panes, app.draft.supplier, app.draft.difficulty);
 }
 
 function draftCurrentPaneCalc() {
   const cp = app.draft?.currentPane;
   if (!cp || !cp.thickness || !cp.coating || !cp.finish || !cp.width || !cp.height) return null;
-  return calcPane(cp, app.draft.floorLevel, app.draft.accessDifficulty, appData.catalog);
+  return calcPane(cp, app.draft.supplier, app.draft.difficulty);
 }
 
 /* ================================================================
@@ -1596,10 +1596,27 @@ function renderNewQuoteStep1() {
   const today = new Date(d.jobDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
   const THICKNESS_OPTS = ['1/8"', '3/16"', '1/4"'];
-  const COATING_OPTS   = [{id:'clear',label:'Clear'},{id:'hardcoat',label:'Hardcoat'},{id:'c180',label:'C180'},{id:'c270',label:'C270/2'},{id:'c360',label:'C360/366'}];
+  const COATING_OPTS   = [{id:'clear',label:'Clear'},{id:'c270',label:'C270/2'},{id:'c360',label:'C360/366'},{id:'hardcoat',label:'Hardcoat'},{id:'c180',label:'C180'}];
   const FINISH_OPTS    = [{id:'annealed',label:'Annealed'},{id:'tempered',label:'Tempered'}];
   const SPACER_OPTS    = [{id:'mill',label:'Mill SP.'},{id:'grey',label:'Grey'},{id:'black',label:'Black'},{id:'other',label:'Other'}];
-  const SHAPE_OPTS     = [{id:'standard',label:'Standard'},{id:'single_slope',label:'Single Slope'},{id:'double_slope',label:'Dbl Slope'},{id:'radius',label:'Radius'}];
+  const SHAPE_OPTS     = [
+    {id:'standard',     label:'Standard'},
+    {id:'single_slope', label:'Single Slope'},
+    {id:'double_slope', label:'Dbl Slope'},
+    {id:'radius',       label:'Radius'},
+    {id:'patterns',     label:'Patterns'},
+    {id:'parallelogram',label:'Parallelogram'},
+    {id:'circle',       label:'Circle'},
+    {id:'octagon',      label:'Octagon'},
+    {id:'triple_pane',  label:'Triple Pane'},
+    {id:'super_spacer', label:'Super Spacer'},
+  ];
+  const SUPPLIER_OPTS   = Object.entries(PRICE_CATALOG.suppliers).map(([id,s])=>({id, name:s.name}));
+  const DIFFICULTY_OPTS = [
+    {id:'easy',   label:'Easy',   sub:'1 hr'},
+    {id:'medium', label:'Medium', sub:'2 hr'},
+    {id:'hard',   label:'Hard',   sub:'3 hr'},
+  ];
 
   return `
 <div class="screen" style="background:var(--bg-0);">
@@ -1644,19 +1661,17 @@ function renderNewQuoteStep1() {
       </div>
     </div>
 
-    <!-- FLOOR + ACCESS -->
-    <div class="section-label mb-8">Floor Level</div>
+    <!-- SUPPLIER + DIFFICULTY -->
+    <div class="section-label mb-8">Supplier</div>
     <div class="chip-group mb-12">
-      ${appData.catalog.modifiers.floorLevel.map(m=>`
-        <div class="chip ${d.floorLevel===m.id?'active':''}" data-floor="${m.id}">
-          ${m.label}<span style="font-size:11px;opacity:0.7;">${m.multiplier!==1?' +'+Math.round((m.multiplier-1)*100)+'%':''}</span>
-        </div>`).join('')}
+      ${SUPPLIER_OPTS.map(s=>`
+        <div class="chip ${d.supplier===s.id?'active':''}" data-supplier="${s.id}">${s.name}</div>`).join('')}
     </div>
-    <div class="section-label mb-8">Access Difficulty</div>
+    <div class="section-label mb-8">Job Difficulty</div>
     <div class="chip-group mb-16">
-      ${appData.catalog.modifiers.accessDifficulty.map(m=>`
-        <div class="chip ${d.accessDifficulty===m.id?'active':''}" data-access="${m.id}">
-          ${m.label}<span style="font-size:11px;opacity:0.7;">${m.multiplier!==1?' +'+Math.round((m.multiplier-1)*100)+'%':''}</span>
+      ${DIFFICULTY_OPTS.map(o=>`
+        <div class="chip ${d.difficulty===o.id?'active':''}" data-difficulty="${o.id}">
+          ${o.label}<span style="font-size:11px;opacity:0.7;"> ${o.sub}</span>
         </div>`).join('')}
     </div>
 
@@ -1777,7 +1792,7 @@ function renderNewQuoteStep1() {
       <div class="chip-group mb-4">
         ${SHAPE_OPTS.map(s=>`
           <div class="chip ${cp.shape===s.id?'active':''}" data-shape="${s.id}">
-            ${s.label}${s.id!=='standard'?` <span style="font-size:11px;opacity:0.8;">×${SHAPE_MULTIPLIERS[s.id]}</span>`:''}
+            ${s.label}${s.id!=='standard'?` <span style="font-size:11px;opacity:0.8;">×${PRICE_CATALOG.shapeMultipliers[s.id]}</span>`:''}
           </div>`).join('')}
       </div>
     </div>
@@ -1792,11 +1807,13 @@ function renderNewQuoteStep1() {
         ${cp.qty>1?` <span style="color:var(--amber);">(×${cp.qty})</span>`:''}
       </div>
       <div class="price-row">
-        <span class="price-row-label">Glass (${paneCalc.sqft.toFixed(2)} sqft${cp.gridEnabled?' + grid':''}${cp.shape!=='standard'?' · '+SHAPE_MULTIPLIERS[cp.shape]+'×':''})</span>
+        <span class="price-row-label">Glass (${paneCalc.sqft.toFixed(2)} sqft${cp.gridEnabled?' + grid':''}${cp.shape!=='standard'?' · '+PRICE_CATALOG.shapeMultipliers[cp.shape]+'×':''})</span>
         <span class="price-row-value">${fmt(paneCalc.productCost)}</span>
       </div>
-      <div class="price-row"><span class="price-row-label">Labor</span><span class="price-row-value">${fmt(paneCalc.laborCost)}</span></div>
-      <div class="price-row"><span class="price-row-label">Materials</span><span class="price-row-value">${fmt(paneCalc.materialsCost)}</span></div>
+      <div class="price-row">
+        <span class="price-row-label">Labor (${getDifficultyLabel(d.difficulty)})</span>
+        <span class="price-row-value">${fmt(paneCalc.laborCost)}</span>
+      </div>
       <div class="price-total-row">
         <span class="price-total-label">Pane Total</span>
         <span class="price-total-value">${fmt(paneCalc.lineTotal)}</span>
@@ -1841,11 +1858,11 @@ function renderNewQuoteStep2() {
   <div class="scroll-content" style="padding-bottom:140px;">
     <div class="flex-between mb-16">
       <span class="section-label">${d.panes.length} Pane${d.panes.length !== 1 ? 's' : ''}</span>
-      <span style="font-size:13px;color:var(--text-2);">Floor: <strong style="color:var(--text-1);">${getModLabel('floor', d.floorLevel)}</strong> · Access: <strong style="color:var(--text-1);">${getModLabel('access', d.accessDifficulty)}</strong></span>
+      <span style="font-size:13px;color:var(--text-2);"><strong style="color:var(--text-1);">${getSupplierName(d.supplier)}</strong> · <strong style="color:var(--text-1);">${getDifficultyLabel(d.difficulty)}</strong></span>
     </div>
 
     ${d.panes.map((p, i) => {
-      const r = calcPane(p, d.floorLevel, d.accessDifficulty, appData.catalog);
+      const r = calcPane(p, d.supplier, d.difficulty);
       const label = getPaneLabel(p);
       const qty = p.qty || 1;
       return `
@@ -1855,7 +1872,7 @@ function renderNewQuoteStep2() {
           <div class="pane-item-type">${label}${p.location?' · <span style="color:var(--text-2);font-weight:400;">'+p.location+'</span>':''}</div>
           <div class="pane-item-dims">${p.width}" × ${p.height}"${qty>1?' × '+qty:''}${r&&!r.requiresQuote?' · '+r.sqft.toFixed(2)+' sqft':''}</div>
           <div style="font-size:12px;color:var(--text-2);margin-top:2px;">
-            ${r&&!r.requiresQuote?'Glass '+fmt(r.productCost)+' · Labor '+fmt(r.laborCost)+' · Matls '+fmt(r.materialsCost):'<span style="color:var(--orange);">⚑ Requires custom quote</span>'}
+            ${r&&!r.requiresQuote?'Glass '+fmt(r.productCost)+' · Labor '+fmt(r.laborCost):'<span style="color:var(--orange);">⚑ Requires custom quote</span>'}
           </div>
         </div>
         <div class="pane-item-price">${r&&!r.requiresQuote?fmt(r.lineTotal):'—'}</div>
@@ -1899,7 +1916,7 @@ function renderNewQuoteStep2() {
 function renderReview() {
   const d = app.draft;
   if (!d) return '';
-  const jobCalc = calcJob(d.panes, d.floorLevel, d.accessDifficulty, appData.catalog);
+  const jobCalc = calcJob(d.panes, d.supplier, d.difficulty);
 
   return `
 <div class="screen" style="background:var(--bg-0);">
@@ -1924,22 +1941,20 @@ function renderReview() {
       </div>
     </div>
 
-    <!-- Modifiers -->
+    <!-- Job Details -->
     <div class="card mb-12">
-      <div class="section-label mb-8">Job Conditions</div>
+      <div class="section-label mb-8">Job Details</div>
       <div style="display:flex;gap:12px;">
         <div style="flex:1;">
-          <div style="font-size:12px;color:var(--text-2);">FLOOR LEVEL</div>
+          <div style="font-size:12px;color:var(--text-2);">SUPPLIER</div>
           <div style="font-family:var(--font-semi);font-weight:700;font-size:16px;color:var(--text-0);margin-top:2px;">
-            ${getModLabel('floor',d.floorLevel)}
-            <span style="font-size:12px;font-weight:400;color:var(--text-2);">(×${appData.catalog.modifiers.floorLevel.find(m=>m.id===d.floorLevel)?.multiplier})</span>
+            ${getSupplierName(d.supplier)}
           </div>
         </div>
         <div style="flex:1;">
-          <div style="font-size:12px;color:var(--text-2);">ACCESS</div>
+          <div style="font-size:12px;color:var(--text-2);">DIFFICULTY</div>
           <div style="font-family:var(--font-semi);font-weight:700;font-size:16px;color:var(--text-0);margin-top:2px;">
-            ${getModLabel('access',d.accessDifficulty)}
-            <span style="font-size:12px;font-weight:400;color:var(--text-2);">(×${appData.catalog.modifiers.accessDifficulty.find(m=>m.id===d.accessDifficulty)?.multiplier})</span>
+            ${getDifficultyLabel(d.difficulty)}
           </div>
         </div>
       </div>
@@ -1948,7 +1963,7 @@ function renderReview() {
     <!-- Line Items -->
     <div class="section-label mb-8">${d.panes.length} Pane${d.panes.length!==1?'s':''} — Line Items</div>
     ${d.panes.map((p,i)=>{
-      const r = calcPane(p, d.floorLevel, d.accessDifficulty, appData.catalog);
+      const r = calcPane(p, d.supplier, d.difficulty);
       const label = getPaneLabel(p);
       const qty = p.qty||1;
       return `
@@ -1963,11 +1978,10 @@ function renderReview() {
         <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">${p.width}" × ${p.height}"${r&&!r.requiresQuote?' · '+r.sqft.toFixed(2)+' sqft':''}</div>
         <div class="divider-dashed"></div>
         <div class="price-row">
-          <span class="price-row-label" style="font-size:13px;">Glass / Product${p.gridEnabled?' (incl. grid)':''}${p.shape&&p.shape!=='standard'?' · '+p.shape.replace('_',' '):''}</span>
+          <span class="price-row-label" style="font-size:13px;">Glass / Product${p.gridEnabled?' (incl. grid)':''}${p.shape&&p.shape!=='standard'?' · '+p.shape.replace(/_/g,' '):''}</span>
           <span class="price-row-value" style="font-size:15px;">${r&&!r.requiresQuote?fmt(r.productCost):'QUOTE'}</span>
         </div>
-        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Labor</span><span class="price-row-value" style="font-size:15px;">${r&&!r.requiresQuote?fmt(r.laborCost):'—'}</span></div>
-        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Materials</span><span class="price-row-value" style="font-size:15px;">${r&&!r.requiresQuote?fmt(r.materialsCost):'—'}</span></div>
+        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Labor (${getDifficultyLabel(d.difficulty)})</span><span class="price-row-value" style="font-size:15px;">${r&&!r.requiresQuote?fmt(r.laborCost):'—'}</span></div>
       </div>`;
     }).join('')}
 
@@ -1976,7 +1990,6 @@ function renderReview() {
       <div class="section-label mb-12">Job Total Breakdown</div>
       <div class="price-row"><span class="price-row-label">Total Glass / Product</span><span class="price-row-value">${fmt(jobCalc.totalProduct)}</span></div>
       <div class="price-row"><span class="price-row-label">Total Labor</span><span class="price-row-value">${fmt(jobCalc.totalLabor)}</span></div>
-      <div class="price-row"><span class="price-row-label">Total Materials</span><span class="price-row-value">${fmt(jobCalc.totalMaterials)}</span></div>
       <div class="price-total-row">
         <span class="price-total-label">Grand Total</span>
         <span class="price-total-value">${fmt(jobCalc.grandTotal)}</span>
@@ -2203,47 +2216,53 @@ function renderAdmin() {
 }
 
 function renderAdminGlassTypes() {
+  const suppliers = Object.entries(PRICE_CATALOG.suppliers);
+  const glassKeys = [
+    { key:'clear_ann',  label:'Clear, Annealed' },
+    { key:'clear_temp', label:'Clear, Tempered' },
+    { key:'c270_ann',   label:'C270/272, Annealed' },
+    { key:'c270_temp',  label:'C270/272, Tempered' },
+    { key:'c360_ann',   label:'C360/366, Annealed' },
+    { key:'c360_temp',  label:'C360/366, Tempered' },
+  ];
+  const thicknesses = ['1/8"','3/16"','1/4"'];
   return `
 <div>
   <div class="alert alert-warning mb-16">
     <span class="alert-icon">⚠</span>
-    These are placeholder rates. Operations team must confirm actual pricing before production use.
+    Raw $/SF rates from supplier price sheets (pre-markup). Rates verified against COST CALCULATOR 2.27.2026.
+    To update rates, edit PRICE_CATALOG in the source code and bump the version.
   </div>
-  <div class="section-label mb-12">Glass Type SKUs</div>
-  <div class="card" style="padding:0;overflow:hidden;">
+  ${thicknesses.map(t => `
+  <div class="section-label mb-8">${t}</div>
+  <div class="card mb-12" style="padding:0;overflow:hidden;">
     <table class="admin-table" style="width:100%;">
       <thead>
-        <tr>
-          <th>Glass Type</th>
-          <th>$/sqft</th>
-          <th>Active</th>
-          <th></th>
-        </tr>
+        <tr><th>Glass Type</th>${suppliers.map(([,s])=>`<th>${s.name}</th>`).join('')}</tr>
       </thead>
       <tbody>
-        ${appData.catalog.glassTypes.map((g, i) => `
+        ${glassKeys.map(g => `
         <tr>
           <td style="font-weight:600;">${g.label}</td>
-          <td id="gt-cost-${g.id}">
-            ${app.editMode === 'gt_' + g.id
-              ? `<input class="inline-edit-input" id="gt-edit-${g.id}" type="number" value="${g.costPerSqft}" step="0.25" min="0" />`
-              : `<span style="font-family:var(--font-title);font-weight:700;font-size:16px;">${fmt(g.costPerSqft)}</span>`
-            }
-          </td>
-          <td>
-            <label class="toggle-switch">
-              <input type="checkbox" ${g.active ? 'checked' : ''} data-toggle-glass="${g.id}" />
-              <span class="toggle-slider"></span>
-            </label>
-          </td>
-          <td>
-            ${app.editMode === 'gt_' + g.id
-              ? `<button class="btn btn-success btn-sm" data-save-glass="${g.id}">Save</button>`
-              : `<button class="btn btn-secondary btn-sm" data-edit-glass="${g.id}">Edit</button>`
-            }
-          </td>
-        </tr>
-        `).join('')}
+          ${suppliers.map(([sid]) => {
+            const rate = PRICE_CATALOG.rates[sid]?.[t]?.[g.key];
+            return `<td>${rate == null ? '<span style="color:var(--orange);">QUOTE</span>' : '<span style="font-family:var(--font-title);font-weight:700;">$'+rate.toFixed(2)+'</span>'}</td>`;
+          }).join('')}
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`).join('')}
+  <div class="section-label mb-8">Supplier Markups &amp; Grid Adders</div>
+  <div class="card" style="padding:0;overflow:hidden;">
+    <table class="admin-table" style="width:100%;">
+      <thead><tr><th>Supplier</th><th>Markup</th><th>Grid Adder/SF</th></tr></thead>
+      <tbody>
+        ${suppliers.map(([,s]) => `
+        <tr>
+          <td style="font-weight:600;">${s.name}</td>
+          <td style="font-family:var(--font-title);font-weight:700;">${Math.round((s.markup-1)*100)}%</td>
+          <td style="font-family:var(--font-title);font-weight:700;">+$${s.gridAdder.toFixed(2)}/SF</td>
+        </tr>`).join('')}
       </tbody>
     </table>
   </div>
@@ -2251,64 +2270,31 @@ function renderAdminGlassTypes() {
 }
 
 function renderAdminLabor() {
-  const lr = appData.catalog.laborRate;
+  const laborRate = PRICE_CATALOG.laborRate;
+  const difficulties = Object.entries(PRICE_CATALOG.laborDifficulty);
   return `
 <div>
-  <div class="section-label mb-12">Labor Base Rate</div>
+  <div class="section-label mb-12">Labor Rate</div>
   <div class="card mb-16">
     <div class="flex-between">
       <div>
-        <div style="font-size:14px;color:var(--text-2);">Base rate per pane</div>
-        <div style="font-family:var(--font-title);font-weight:800;font-size:28px;color:var(--amber);">
-          ${app.editMode === 'labor'
-            ? `<input class="inline-edit-input" id="labor-edit" type="number" value="${lr.baseRatePerPane}" step="5" min="0" style="width:120px;font-size:22px;" />`
-            : fmt(lr.baseRatePerPane)
-          }
-        </div>
-        <div style="font-size:12px;color:var(--text-3);">Effective: ${fmtDate(lr.effectiveDate)}</div>
+        <div style="font-size:14px;color:var(--text-2);">Hourly labor rate</div>
+        <div style="font-family:var(--font-title);font-weight:800;font-size:28px;color:var(--amber);">$${laborRate}/hr</div>
+        <div style="font-size:12px;color:var(--text-3);margin-top:4px;">Source: COST CALCULATOR 2.27.2026. Update in PRICE_CATALOG.laborRate.</div>
       </div>
-      ${app.editMode === 'labor'
-        ? `<button class="btn btn-success btn-sm" id="save-labor">Save</button>`
-        : `<button class="btn btn-secondary btn-sm" id="edit-labor">Edit</button>`
-      }
     </div>
   </div>
-
-  <div class="section-label mb-12">Floor Level Multipliers</div>
-  <div class="card mb-16" style="padding:0;overflow:hidden;">
-    <table class="admin-table">
-      <thead><tr><th>Level</th><th>Multiplier</th><th>Labor Impact</th></tr></thead>
-      <tbody>
-        ${appData.catalog.modifiers.floorLevel.map(m => `
-        <tr>
-          <td style="font-weight:600;">${m.label}</td>
-          <td>
-            ${app.editMode === 'fl_' + m.id
-              ? `<input class="inline-edit-input" id="fl-edit-${m.id}" type="number" value="${m.multiplier}" step="0.05" min="1" max="3" />`
-              : `<span style="font-family:var(--font-title);font-weight:700;">${m.multiplier}×</span>`
-            }
-          </td>
-          <td style="color:var(--text-2);">
-            ${fmt(lr.baseRatePerPane * m.multiplier)}
-          </td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table>
-  </div>
-
-  <div class="section-label mb-12">Access Difficulty Multipliers</div>
+  <div class="section-label mb-12">Difficulty Levels</div>
   <div class="card" style="padding:0;overflow:hidden;">
-    <table class="admin-table">
-      <thead><tr><th>Access</th><th>Multiplier</th><th>Labor Impact</th></tr></thead>
+    <table class="admin-table" style="width:100%;">
+      <thead><tr><th>Difficulty</th><th>Hours</th><th>Labor Cost</th></tr></thead>
       <tbody>
-        ${appData.catalog.modifiers.accessDifficulty.map(m => `
+        ${difficulties.map(([id, hrs]) => `
         <tr>
-          <td style="font-weight:600;">${m.label}</td>
-          <td><span style="font-family:var(--font-title);font-weight:700;">${m.multiplier}×</span></td>
-          <td style="color:var(--text-2);">${fmt(lr.baseRatePerPane * m.multiplier)}</td>
-        </tr>
-        `).join('')}
+          <td style="font-weight:600;">${id.charAt(0).toUpperCase()+id.slice(1)}</td>
+          <td style="font-family:var(--font-title);font-weight:700;">${hrs} hr</td>
+          <td style="font-family:var(--font-title);font-weight:700;color:var(--amber);">${fmt(hrs * laborRate)}</td>
+        </tr>`).join('')}
       </tbody>
     </table>
   </div>
@@ -2316,33 +2302,27 @@ function renderAdminLabor() {
 }
 
 function renderAdminMaterials() {
-  const mr = appData.catalog.materialsRate;
   return `
 <div>
-  <div class="section-label mb-12">Materials Rate</div>
-  <div class="card mb-16">
-    <div style="font-size:14px;color:var(--text-2);margin-bottom:4px;">Cost per linear inch of perimeter</div>
-    <div style="font-family:var(--font-title);font-weight:800;font-size:28px;color:var(--amber);">
-      ${app.editMode === 'mat'
-        ? `<input class="inline-edit-input" id="mat-edit" type="number" value="${mr.costPerLinearInch}" step="0.005" min="0" style="width:130px;font-size:22px;" />`
-        : ('$' + mr.costPerLinearInch.toFixed(3) + '/in')
-      }
-    </div>
-    <div style="font-size:12px;color:var(--text-3);margin-top:4px;">Effective: ${fmtDate(mr.effectiveDate)}</div>
-    <div style="margin-top:14px;">
-      ${app.editMode === 'mat'
-        ? `<button class="btn btn-success btn-sm" id="save-mat">Save</button>`
-        : `<button class="btn btn-secondary btn-sm" id="edit-mat">Edit</button>`
-      }
-    </div>
+  <div class="section-label mb-12">Shape Multipliers</div>
+  <div class="card" style="padding:0;overflow:hidden;">
+    <table class="admin-table" style="width:100%;">
+      <thead><tr><th>Shape</th><th>Multiplier</th></tr></thead>
+      <tbody>
+        ${Object.entries(PRICE_CATALOG.shapeMultipliers).map(([id, mult]) => `
+        <tr>
+          <td style="font-weight:600;">${id.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}</td>
+          <td style="font-family:var(--font-title);font-weight:700;">${mult}×</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
   </div>
-
-  <div class="card" style="background:var(--bg-2);">
-    <div class="section-label mb-8">Materials Calculator Reference</div>
-    <div style="font-size:13px;color:var(--text-2);line-height:1.8;">
-      <div>24"×36" pane perimeter = 120 in → Materials = <strong style="color:var(--text-0);">${fmt(120 * mr.costPerLinearInch)}</strong></div>
-      <div>36"×48" pane perimeter = 168 in → Materials = <strong style="color:var(--text-0);">${fmt(168 * mr.costPerLinearInch)}</strong></div>
-      <div>48"×60" pane perimeter = 216 in → Materials = <strong style="color:var(--text-0);">${fmt(216 * mr.costPerLinearInch)}</strong></div>
+  <div class="card mt-12" style="background:var(--bg-2);">
+    <div class="section-label mb-8">Pricing Formula Reference</div>
+    <div style="font-size:13px;color:var(--text-2);line-height:2.0;font-family:monospace;">
+      <div>SF = (width × height) / 144</div>
+      <div>glassCost = SF × (rawRate + gridAdder) × markup × shapeMult</div>
+      <div>sellPrice = glassCost × 3 + laborHrs × $${PRICE_CATALOG.laborRate}</div>
     </div>
   </div>
 </div>`;
@@ -2390,27 +2370,29 @@ function renderCustomerView(quoteId) {
   let q, jobCalc;
   if (quoteId === '__draft__' && app.draft) {
     const d = app.draft;
-    jobCalc = calcJob(d.panes, d.floorLevel, d.accessDifficulty, appData.catalog);
+    jobCalc = calcJob(d.panes, d.supplier, d.difficulty);
     q = {
       customerName: d.customerName,
       customerContact: d.customerContact,
       jobDate: d.jobDate,
       panes: d.panes,
-      floorLevel: d.floorLevel,
-      accessDifficulty: d.accessDifficulty,
+      supplier: d.supplier,
+      difficulty: d.difficulty,
       totalProduct: jobCalc.totalProduct,
       totalLabor: jobCalc.totalLabor,
-      totalMaterials: jobCalc.totalMaterials,
+      totalMaterials: 0,
       grandTotal: jobCalc.grandTotal,
     };
   } else {
     q = appData.quotes.find(x => x.id === quoteId);
     if (!q) return '<div>Quote not found</div>';
-    jobCalc = { totalProduct: q.totalProduct, totalLabor: q.totalLabor, totalMaterials: q.totalMaterials, grandTotal: q.grandTotal };
+    jobCalc = { totalProduct: q.totalProduct, totalLabor: q.totalLabor, totalMaterials: 0, grandTotal: q.grandTotal };
   }
 
+  const supplier    = q.supplier || 'busick';
+  const difficulty  = q.difficulty || 'easy';
   const lineItems = q.panes.map((p, i) => {
-    const r = calcPane(p, q.floorLevel, q.accessDifficulty, appData.catalog);
+    const r = calcPane(p, supplier, difficulty);
     return { ...p, ...(r && !r.requiresQuote ? r : {}), idx: i };
   });
 
@@ -2434,7 +2416,6 @@ function renderCustomerView(quoteId) {
     <div class="cv-label">Pane ${i+1}${item.location?' — '+item.location:''} — ${getPaneLabel(item)}${(item.qty||1)>1?' (×'+item.qty+')':''}</div>
     <div class="cv-line-item"><span class="cv-line-label">${item.width}" × ${item.height}"${item.sqft?' ('+item.sqft.toFixed(2)+' sqft)':''}</span><span class="cv-line-value">${item.productCost?fmt(item.productCost):'QUOTE'}</span></div>
     <div class="cv-line-item"><span class="cv-line-label">Labor</span><span class="cv-line-value">${item.laborCost?fmt(item.laborCost):'—'}</span></div>
-    <div class="cv-line-item"><span class="cv-line-label">Materials</span><span class="cv-line-value">${item.materialsCost?fmt(item.materialsCost):'—'}</span></div>
   </div>
   `).join('')}
 
@@ -2442,7 +2423,6 @@ function renderCustomerView(quoteId) {
 
   <div class="cv-line-item"><span class="cv-line-label">Total Glass/Product</span><span class="cv-line-value">${fmt(q.totalProduct)}</span></div>
   <div class="cv-line-item"><span class="cv-line-label">Total Labor</span><span class="cv-line-value">${fmt(q.totalLabor)}</span></div>
-  <div class="cv-line-item"><span class="cv-line-label">Total Materials</span><span class="cv-line-value">${fmt(q.totalMaterials)}</span></div>
 
   <div class="cv-total" style="border-top:2px solid #000;margin-top:8px;">
     <span class="cv-total-label">ESTIMATE TOTAL</span>
@@ -2563,9 +2543,9 @@ function attachEvents() {
     render();
   });
 
-  // Floor/access modifiers
-  delegate('[data-floor]',  'click', e => { app.draft.floorLevel      = e.currentTarget.dataset.floor;  render(); });
-  delegate('[data-access]', 'click', e => { app.draft.accessDifficulty = e.currentTarget.dataset.access; render(); });
+  // Supplier / difficulty selectors
+  delegate('[data-supplier]',   'click', e => { app.draft.supplier   = e.currentTarget.dataset.supplier;   render(); });
+  delegate('[data-difficulty]', 'click', e => { app.draft.difficulty = e.currentTarget.dataset.difficulty; render(); });
 
   // Pane tab — switch to new
   on('pane-tab-new', 'click', () => {
@@ -2729,54 +2709,6 @@ function attachEvents() {
     render();
   });
 
-  // Admin glass type edits
-  delegate('[data-edit-glass]', 'click', e => {
-    app.editMode = 'gt_' + e.currentTarget.dataset.editGlass;
-    render();
-  });
-  delegate('[data-save-glass]', 'click', e => {
-    const id = e.currentTarget.dataset.saveGlass;
-    const val = parseFloat(document.getElementById('gt-edit-' + id)?.value);
-    if (val > 0) {
-      const g = appData.catalog.glassTypes.find(x => x.id === id);
-      if (g) { g.costPerSqft = val; appData.catalog.version++; appData.catalog.lastUpdated = new Date().toISOString(); saveState(appData); }
-    }
-    app.editMode = null;
-    render();
-  });
-  delegate('[data-toggle-glass]', 'change', e => {
-    const id = e.currentTarget.dataset.toggleGlass;
-    const g = appData.catalog.glassTypes.find(x => x.id === id);
-    if (g) { g.active = e.currentTarget.checked; saveState(appData); render(); }
-  });
-
-  // Admin labor edit
-  on('edit-labor', 'click', () => { app.editMode = 'labor'; render(); });
-  on('save-labor', 'click', () => {
-    const val = parseFloat(document.getElementById('labor-edit')?.value);
-    if (val > 0) {
-      appData.catalog.laborRate.baseRatePerPane = val;
-      appData.catalog.laborRate.effectiveDate = new Date().toISOString();
-      appData.catalog.version++;
-      saveState(appData);
-    }
-    app.editMode = null;
-    render();
-  });
-
-  // Admin materials edit
-  on('edit-mat', 'click', () => { app.editMode = 'mat'; render(); });
-  on('save-mat', 'click', () => {
-    const val = parseFloat(document.getElementById('mat-edit')?.value);
-    if (val > 0) {
-      appData.catalog.materialsRate.costPerLinearInch = val;
-      appData.catalog.materialsRate.effectiveDate = new Date().toISOString();
-      appData.catalog.version++;
-      saveState(appData);
-    }
-    app.editMode = null;
-    render();
-  });
 }
 
 function attachCustomerViewEvents() {
@@ -2820,7 +2752,7 @@ function handleLogin() {
 ================================================================ */
 function finalizeDraft(status) {
   const d = app.draft;
-  const jobCalc = calcJob(d.panes, d.floorLevel, d.accessDifficulty, appData.catalog);
+  const jobCalc = calcJob(d.panes, d.supplier, d.difficulty);
   const quote = {
     id: d.id,
     techId: app.currentUser.id,
@@ -2833,8 +2765,8 @@ function finalizeDraft(status) {
     notes: d.notes || '',
     toolsRequired: d.toolsRequired || '',
     status: status,
-    floorLevel: d.floorLevel,
-    accessDifficulty: d.accessDifficulty,
+    supplier: d.supplier,
+    difficulty: d.difficulty,
     panes: d.panes,
     totalProduct: jobCalc.totalProduct,
     totalLabor: jobCalc.totalLabor,
@@ -2869,8 +2801,8 @@ function viewQuoteFromHistory(quoteId) {
     jobNum: q.jobNum || '',
     notes: q.notes || '',
     toolsRequired: q.toolsRequired || '',
-    floorLevel: q.floorLevel,
-    accessDifficulty: q.accessDifficulty,
+    supplier: q.supplier || 'busick',
+    difficulty: q.difficulty || 'easy',
     panes: q.panes,
     currentPane: freshPane(),
     editingPaneIdx: null,
