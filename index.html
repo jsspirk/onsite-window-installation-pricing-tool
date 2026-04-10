@@ -1666,13 +1666,13 @@ function renderNewQuoteStep1() {
 
     <!-- JOB-LEVEL: SUPPLIER + DIFFICULTY (apply to all panes) -->
     <div class="card mb-12">
-      <div class="section-label mb-12" style="color:var(--text-2);">Job Settings — apply to all panes</div>
-      <div style="font-size:12px;color:var(--text-2);margin-bottom:8px;">Supplier</div>
+      <div class="section-label mb-12">Job Settings — apply to all panes</div>
+      <div class="section-label mb-8">Supplier</div>
       <div class="chip-group mb-12">
         ${SUPPLIER_OPTS.map(s=>`
           <div class="chip ${d.supplier===s.id?'active':''}" data-supplier="${s.id}">${s.name}</div>`).join('')}
       </div>
-      <div style="font-size:12px;color:var(--text-2);margin-bottom:8px;">Job Difficulty</div>
+      <div class="section-label mb-8">Job Difficulty</div>
       <div class="chip-group mb-0">
         ${DIFFICULTY_OPTS.map(o=>`
           <div class="chip ${d.difficulty===o.id?'active':''}" data-difficulty="${o.id}">
@@ -1693,7 +1693,7 @@ function renderNewQuoteStep1() {
 
     <!-- THIS WINDOW CARD -->
     <div class="card" style="border-color:${isEditing?'var(--blue)':'var(--border-0)'};">
-      <div class="section-label mb-12" style="color:${isEditing?'var(--blue)':'var(--text-2)'};">
+      <div class="section-label mb-12" style="${isEditing?'color:var(--blue);':''}">
         ${isEditing?'Editing Pane '+(d.editingPaneIdx+1):'This Window'}
       </div>
 
@@ -1714,11 +1714,11 @@ function renderNewQuoteStep1() {
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
         <div class="form-group">
-          <label class="form-label">Width (${cp.unit})</label>
+          <label class="form-label">Width <span style="text-transform:none;">(${cp.unit})</span></label>
           <input class="form-input form-input-large" id="pane-width" type="number" inputmode="decimal" placeholder="0" value="${cp.width}" min="1" max="300" />
         </div>
         <div class="form-group">
-          <label class="form-label">Height (${cp.unit})</label>
+          <label class="form-label">Height <span style="text-transform:none;">(${cp.unit})</span></label>
           <input class="form-input form-input-large" id="pane-height" type="number" inputmode="decimal" placeholder="0" value="${cp.height}" min="1" max="300" />
         </div>
       </div>
@@ -1731,17 +1731,17 @@ function renderNewQuoteStep1() {
       ${largePaneWarn?`<div class="alert alert-warning mb-12"><span class="alert-icon">⚠</span>Pane exceeds standard catalog size. Flag for office review.</div>`:''}
 
       <div class="section-label mb-8">Thickness</div>
-      <div class="chip-group mb-16">
+      <div class="chip-group mb-12">
         ${THICKNESS_OPTS.map(t=>`<div class="chip ${cp.thickness===t?'active':''}" data-thickness="${t.replace(/"/g,'&quot;')}">${t}</div>`).join('')}
       </div>
 
       <div class="section-label mb-8">Coating / Low-E</div>
-      <div class="chip-group mb-16">
+      <div class="chip-group mb-12">
         ${COATING_OPTS.map(c=>`<div class="chip ${cp.coating===c.id?'active':''}" data-coating="${c.id}">${c.label}</div>`).join('')}
       </div>
 
       <div class="section-label mb-8">Finish</div>
-      <div class="chip-group mb-16">
+      <div class="chip-group mb-12">
         ${FINISH_OPTS.map(f=>`<div class="chip ${cp.finish===f.id?'active':''}" data-finish="${f.id}">${f.label}</div>`).join('')}
       </div>
 
@@ -1749,7 +1749,7 @@ function renderNewQuoteStep1() {
       <div class="chip-group mb-12">
         ${SPACER_OPTS.map(s=>`<div class="chip ${cp.spacer===s.id?'active':''}" data-spacer="${s.id}">${s.label}</div>`).join('')}
       </div>
-      ${cp.spacer==='other'?`<input class="form-input mb-16" id="spacer-other" placeholder="Specify spacer" value="${cp.spacerOther||''}" />`:'<div style="margin-bottom:16px;"></div>'}
+      ${cp.spacer==='other'?`<input class="form-input mb-12" id="spacer-other" placeholder="Specify spacer" value="${cp.spacerOther||''}" />`:''}
 
       <div class="toggle-wrap mb-12">
         <span class="section-label">Grid</span>
@@ -1762,7 +1762,7 @@ function renderNewQuoteStep1() {
       <div class="grid-reveal mb-16">
         <div class="form-row mb-10">
           <div class="form-group">
-            <label class="form-label">Horizontal (H)</label>
+            <label class="form-label">Horizontal <span style="text-transform:none;">(H)</span></label>
             <div class="qty-stepper">
               <button class="qty-btn" data-grid-adj="h" data-dir="-1">−</button>
               <span class="qty-val">${cp.gridH||0}</span>
@@ -1770,7 +1770,7 @@ function renderNewQuoteStep1() {
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label">Vertical (V)</label>
+            <label class="form-label">Vertical <span style="text-transform:none;">(V)</span></label>
             <div class="qty-stepper">
               <button class="qty-btn" data-grid-adj="v" data-dir="-1">−</button>
               <span class="qty-val">${cp.gridV||0}</span>
@@ -1791,7 +1791,7 @@ function renderNewQuoteStep1() {
       </div>`:'<div style="margin-bottom:16px;"></div>'}
 
       <div class="section-label mb-8">Shape</div>
-      <div class="chip-group mb-16">
+      <div class="chip-group mb-12">
         ${SHAPE_OPTS.map(s=>`
           <div class="chip ${cp.shape===s.id?'active':''}" data-shape="${s.id}">
             ${s.label}${s.id!=='standard'?` <span style="font-size:11px;opacity:0.8;">×${PRICE_CATALOG.shapeMultipliers[s.id]}</span>`:''}
@@ -2056,7 +2056,7 @@ function renderSendModal(jobCalc) {
     </div>
     ` : `
     <div class="form-group mb-12">
-      <label class="form-label">Customer Contact (Required to send)</label>
+      <label class="form-label">Contact</label>
       <input class="form-input" id="modal-contact" placeholder="Phone or email" value="${d.customerContact}" />
     </div>
     <select class="form-input mb-12" id="modal-contact-type">
