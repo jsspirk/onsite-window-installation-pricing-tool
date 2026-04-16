@@ -1365,6 +1365,7 @@ function navigate(route, params = {}) {
   app.route = route;
   app.routeParams = params;
   app.sendModal = false;
+  app._routeChanged = true;
   render();
   window.scrollTo(0, 0);
 }
@@ -1492,6 +1493,15 @@ function render() {
     case 'admin':     el.innerHTML = renderAdmin(); break;
     default:          el.innerHTML = renderLogin();
   }
+
+  // Suppress fadeIn animation for in-screen state updates (chip clicks, toggles, etc.)
+  // Only let it play on real route navigations so screen transitions still feel smooth
+  if (!app._routeChanged) {
+    const screen = el.querySelector('.screen');
+    if (screen) screen.style.animation = 'none';
+  }
+  app._routeChanged = false;
+
   attachEvents();
 }
 
