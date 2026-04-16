@@ -61,6 +61,56 @@
     }
 
     /* ================================================================
+       LIGHT THEME OVERRIDES
+    ================================================================ */
+    [data-theme="light"] {
+      --bg-0: #F0F2F7;
+      --bg-1: #FFFFFF;
+      --bg-2: #E8EBF2;
+      --bg-3: #DDE1EC;
+      --bg-card: #FFFFFF;
+      --bg-input: #F5F7FB;
+
+      --amber: #D97706;
+      --amber-dim: #92400E;
+      --amber-glow: rgba(217,119,6,0.15);
+      --amber-bg: rgba(217,119,6,0.08);
+
+      --green: #059669;
+      --green-bg: rgba(5,150,105,0.1);
+      --red: #DC2626;
+      --red-bg: rgba(220,38,38,0.1);
+      --orange: #EA580C;
+      --orange-bg: rgba(234,88,12,0.1);
+      --blue: #2563EB;
+      --blue-bg: rgba(37,99,235,0.1);
+
+      --text-0: #0C0E14;
+      --text-1: #2D3748;
+      --text-2: #5A677A;
+      --text-3: #9AA5B4;
+
+      --border-0: #CDD3DF;
+      --border-1: #E2E7F0;
+
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+      --shadow-md: 0 4px 16px rgba(0,0,0,0.12);
+      --shadow-lg: 0 8px 32px rgba(0,0,0,0.16);
+    }
+
+    /* Theme toggle button */
+    .theme-toggle {
+      width: 36px; height: 36px;
+      display: flex; align-items: center; justify-content: center;
+      background: none; border: none; cursor: pointer;
+      color: var(--text-2);
+      font-size: 18px;
+      border-radius: var(--radius-sm);
+      transition: color 0.15s, background 0.15s;
+    }
+    .theme-toggle:active { color: var(--amber); background: var(--amber-bg); }
+
+    /* ================================================================
        RESET & BASE
     ================================================================ */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1449,9 +1499,11 @@ function render() {
    RENDER: CONNECTION BADGE
 ================================================================ */
 function connBadge() {
-  return app.isOnline
+  const isLight = document.documentElement.dataset.theme === 'light';
+  const badge = app.isOnline
     ? `<span class="online-badge">● Online</span>`
     : `<span class="offline-badge">⚠ Offline</span>`;
+  return badge + `<button class="theme-toggle" id="theme-toggle-btn" title="Toggle theme">${isLight ? '🌙' : '☀️'}</button>`;
 }
 
 /* ================================================================
@@ -2449,6 +2501,9 @@ function attachEvents() {
     document.querySelectorAll(selector).forEach(el => el.addEventListener(ev, fn));
   };
 
+  // ---- THEME ----
+  on('theme-toggle-btn', 'click', toggleTheme);
+
   // ---- LOGIN ----
   on('login-btn', 'click', handleLogin);
   on('login-pass', 'keydown', e => { if (e.key === 'Enter') handleLogin(); });
@@ -2901,6 +2956,20 @@ window.addEventListener('beforeunload', () => {
     sessionStorage.removeItem('fg_user');
   }
 });
+
+// Apply saved theme before first render to avoid flash
+(function() {
+  const saved = localStorage.getItem('fg_theme') || 'dark';
+  document.documentElement.dataset.theme = saved;
+})();
+
+function toggleTheme() {
+  const isLight = document.documentElement.dataset.theme === 'light';
+  const next = isLight ? 'dark' : 'light';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('fg_theme', next);
+  render();
+}
 
 init();
 </script>
