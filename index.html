@@ -1000,7 +1000,10 @@
     .toggle-wrap { display: flex; align-items: center; justify-content: space-between; }
     .section-header-row { display: flex; align-items: center; gap: 10px; }
     .chip-disabled { opacity: 0.3; pointer-events: none; }
-    .dim-resolved { font-size: 13px; color: var(--amber); padding: 4px 0 0 2px; }
+    .dim-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+    .dim-whole-input { width: 72px; flex-shrink: 0; text-align: center; font-family: var(--font-title); font-size: 22px; font-weight: 700; padding: 8px 6px; }
+    .dim-frac-chip { min-width: 36px; height: 36px; padding: 0 8px; font-size: 15px; display: flex; align-items: center; justify-content: center; }
+    .dim-resolved { font-size: 13px; color: var(--amber); padding: 2px 0 10px 2px; min-height: 24px; }
     .toggle-label { font-size: 15px; color: var(--text-1); }
     .toggle-switch {
       position: relative;
@@ -1814,31 +1817,25 @@ function renderNewQuoteStep1() {
         </div>
       </div>
 
-      <div class="section-label mb-8">Dimensions <span style="text-transform:none;font-weight:400;color:var(--text-2);">(block measurement, in)</span></div>
+      <div class="section-label mb-8">Dimensions <span style="text-transform:none;font-weight:400;color:var(--text-2);">(block, in)</span></div>
 
       <!-- WIDTH -->
-      <div class="form-group mb-4">
-        <label class="form-label">Width</label>
-        <input class="form-input form-input-large" id="pane-width-whole" type="number" inputmode="numeric"
-          placeholder="whole inches" value="${cp.widthWhole}" min="1" max="300"
-          style="max-width:160px;" />
-      </div>
-      <div class="chip-group mb-4" style="flex-wrap:wrap;">
+      <label class="form-label mb-4">Width</label>
+      <div class="dim-row">
+        <input class="form-input dim-whole-input" id="pane-width-whole" type="number" inputmode="numeric"
+          placeholder="0" value="${cp.widthWhole}" min="1" max="300" />
         ${FRAC_OPTS.map(f => `<div class="chip dim-frac-chip ${cp.widthFrac===f.id?'active':''} ${!cp.widthWhole?'chip-disabled':''}" data-dim="width" data-frac="${f.id}">${f.label}</div>`).join('')}
       </div>
-      ${cp.widthWhole ? `<div class="dim-resolved mb-12">→ <strong>${cp.width}"</strong>${cp.widthFrac ? ` <span style="color:var(--text-3);">(measured ${fmtMeasured(cp.widthWhole, cp.widthFrac)}")</span>` : ''}</div>` : '<div class="mb-12"></div>'}
+      <div class="dim-resolved">${cp.widthWhole ? `→ <strong>${cp.width}"</strong>${cp.widthFrac ? ` <span style="color:var(--text-3);">(measured ${fmtMeasured(cp.widthWhole, cp.widthFrac)}")</span>` : ''}` : ''}</div>
 
       <!-- HEIGHT -->
-      <div class="form-group mb-4">
-        <label class="form-label">Height</label>
-        <input class="form-input form-input-large" id="pane-height-whole" type="number" inputmode="numeric"
-          placeholder="whole inches" value="${cp.heightWhole}" min="1" max="300"
-          style="max-width:160px;" />
-      </div>
-      <div class="chip-group mb-4" style="flex-wrap:wrap;">
+      <label class="form-label mb-4">Height</label>
+      <div class="dim-row">
+        <input class="form-input dim-whole-input" id="pane-height-whole" type="number" inputmode="numeric"
+          placeholder="0" value="${cp.heightWhole}" min="1" max="300" />
         ${FRAC_OPTS.map(f => `<div class="chip dim-frac-chip ${cp.heightFrac===f.id?'active':''} ${!cp.heightWhole?'chip-disabled':''}" data-dim="height" data-frac="${f.id}">${f.label}</div>`).join('')}
       </div>
-      ${cp.heightWhole ? `<div class="dim-resolved mb-16">→ <strong>${cp.height}"</strong>${cp.heightFrac ? ` <span style="color:var(--text-3);">(measured ${fmtMeasured(cp.heightWhole, cp.heightFrac)}")</span>` : ''}</div>` : '<div class="mb-16"></div>'}
+      <div class="dim-resolved" style="margin-bottom:16px;">${cp.heightWhole ? `→ <strong>${cp.height}"</strong>${cp.heightFrac ? ` <span style="color:var(--text-3);">(measured ${fmtMeasured(cp.heightWhole, cp.heightFrac)}")</span>` : ''}` : ''}</div>
 
       ${largePaneWarn?`<div class="alert alert-warning mb-12"><span class="alert-icon">⚠</span>Pane exceeds standard catalog size. Flag for office review.</div>`:''}
 
