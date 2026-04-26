@@ -13,6 +13,7 @@
  *   H. PRICE_CATALOG shape multipliers (super_spacer removed)
  *   I. freshPane shape — new fields present, old fields absent
  *   J. Backward compatibility — old panes with gridEnabled still price correctly
+ *   K. Dimension entry — whole + fraction → ceiling inch conversion
  */
 
 'use strict';
@@ -128,19 +129,48 @@ function calcJob(panes, supplier) {
   };
 }
 
+const FRAC_OPTS = [
+  { id: '',    label: '—',  val: 0   },
+  { id: '1/8', label: '⅛', val: 1/8 },
+  { id: '1/4', label: '¼', val: 1/4 },
+  { id: '3/8', label: '⅜', val: 3/8 },
+  { id: '1/2', label: '½', val: 1/2 },
+  { id: '5/8', label: '⅝', val: 5/8 },
+  { id: '3/4', label: '¾', val: 3/4 },
+  { id: '7/8', label: '⅞', val: 7/8 },
+];
+
+function resolveInches(whole, fracId) {
+  const w = parseInt(whole) || 0;
+  if (!w) return 0;
+  const frac = FRAC_OPTS.find(f => f.id === fracId);
+  const fracVal = frac ? frac.val : 0;
+  return fracVal === 0 ? w : w + 1;
+}
+
+function fmtMeasured(whole, fracId) {
+  if (!parseInt(whole)) return '';
+  const frac = FRAC_OPTS.find(f => f.id === fracId);
+  return `${whole}${frac && frac.label !== '—' ? frac.label : ''}`;
+}
+
 function freshPane(from) {
   return {
-    thickness: from?.thickness || '1/8"',
-    coating:   from?.coating   || 'clear',
-    finish:    from?.finish    || 'annealed',
-    grid:      'none',
-    shape:     'standard',
-    location:  '',
-    qty:       1,
-    width:     '',
-    height:    '',
-    unit:      from?.unit || 'in',
-    laborHrs:  1.0,
+    thickness:   from?.thickness || '1/8"',
+    coating:     from?.coating   || 'clear',
+    finish:      from?.finish    || 'annealed',
+    grid:        'none',
+    shape:       'standard',
+    location:    '',
+    qty:         1,
+    widthWhole:  '',
+    widthFrac:   '',
+    heightWhole: '',
+    heightFrac:  '',
+    width:       0,
+    height:      0,
+    unit:        'in',
+    laborHrs:    1.0,
   };
 }
 
@@ -184,19 +214,23 @@ function section(title) {
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
-/** Build a minimal valid pane with overrides */
+/** Build a minimal valid pane with overrides. width/height are ceiling values. */
 function pane(overrides = {}) {
   return {
-    thickness: '1/8"',
-    coating:   'clear',
-    finish:    'annealed',
-    grid:      'none',
-    shape:     'standard',
-    qty:       1,
-    width:     24,
-    height:    36,
-    unit:      'in',
-    laborHrs:  1.0,
+    thickness:   '1/8"',
+    coating:     'clear',
+    finish:      'annealed',
+    grid:        'none',
+    shape:       'standard',
+    qty:         1,
+    widthWhole:  '24',
+    widthFrac:   '',
+    heightWhole: '36',
+    heightFrac:  '',
+    width:       24,
+    height:      36,
+    unit:        'in',
+    laborHrs:    1.0,
     ...overrides,
   };
 }
@@ -246,6 +280,20 @@ test('freshPane has grid field defaulting to "none"', () => {
 });
 test('freshPane has laborHrs field defaulting to 1.0', () => {
   assert.strictEqual(freshPane().laborHrs, 1.0);
+});
+test('freshPane has widthWhole, widthFrac, heightWhole, heightFrac fields', () => {
+  const fp = freshPane();
+  assert.ok('widthWhole' in fp && 'widthFrac' in fp && 'heightWhole' in fp && 'heightFrac' in fp);
+});
+test('freshPane width and height default to 0 (ceiling int)', () => {
+  const fp = freshPane();
+  assert.strictEqual(fp.width,  0);
+  assert.strictEqual(fp.height, 0);
+});
+test('freshPane has no decimal width or height string', () => {
+  const fp = freshPane();
+  assert.ok(typeof fp.width  === 'number', 'width should be a number');
+  assert.ok(typeof fp.height === 'number', 'height should be a number');
 });
 
 // ─── C. Grid — 3-option chip ─────────────────────────────────────────────────
@@ -517,6 +565,74 @@ test('calcJob skips panes that requiresQuote', () => {
   const good = calcPane(panes[1], 'busick');
   // Only the second pane should contribute
   assert.strictEqual(job.totalProduct, good.productCost);
+});
+
+// ─── K. Dimension entry — resolveInches & fmtMeasured ───────────────────────
+
+section('K. Dimension entry — whole + fraction → ceiling');
+
+test('whole number, no fraction → unchanged', () => {
+  assert.strictEqual(resolveInches('24', ''), 24);
+});
+test('whole number + 1/2 → ceiling (next inch)', () => {
+  assert.strictEqual(resolveInches('23', '1/2'), 24);
+});
+test('whole number + 1/8 → ceiling (any fraction rounds up)', () => {
+  assert.strictEqual(resolveInches('23', '1/8'), 24);
+});
+test('whole number + 7/8 → ceiling', () => {
+  assert.strictEqual(resolveInches('23', '7/8'), 24);
+});
+test('whole number + 3/4 → ceiling', () => {
+  assert.strictEqual(resolveInches('47', '3/4'), 48);
+});
+test('whole number + 1/4 → ceiling', () => {
+  assert.strictEqual(resolveInches('35', '1/4'), 36);
+});
+test('empty whole returns 0 regardless of fraction', () => {
+  assert.strictEqual(resolveInches('', '3/4'), 0);
+  assert.strictEqual(resolveInches('', ''),    0);
+});
+test('0 whole returns 0', () => {
+  assert.strictEqual(resolveInches('0', '1/2'), 0);
+});
+test('exact whole — price is based on stated dimension', () => {
+  // 24" no fraction → priced at 24, not 25
+  const r36 = calcPane(pane({ widthWhole: '36', widthFrac: '', width: 36, height: 48 }), 'busick');
+  const r37 = calcPane(pane({ widthWhole: '36', widthFrac: '1/2', width: 37, height: 48 }), 'busick');
+  assert.ok(r37.productCost > r36.productCost, 'Fractional width should produce higher sqft and cost');
+});
+test('ceiling causes measurable sqft difference (23¾ priced as 24)', () => {
+  const measured = calcPane(pane({ width: 23, height: 36 }), 'busick'); // no fraction, priced at 23
+  const ceiling  = calcPane(pane({ width: 24, height: 36 }), 'busick'); // with fraction, priced at 24
+  assert.ok(ceiling.sqft > measured.sqft, `24" sqft (${ceiling.sqft}) should exceed 23" sqft (${measured.sqft})`);
+});
+
+section('K2. fmtMeasured display string');
+
+test('whole only → plain number string', () => {
+  assert.strictEqual(fmtMeasured('24', ''), '24');
+});
+test('whole + fraction → number + fraction glyph', () => {
+  assert.strictEqual(fmtMeasured('23', '3/4'), '23¾');
+});
+test('whole + 1/2 → number + ½', () => {
+  assert.strictEqual(fmtMeasured('36', '1/2'), '36½');
+});
+test('whole + 1/8 → number + ⅛', () => {
+  assert.strictEqual(fmtMeasured('47', '1/8'), '47⅛');
+});
+test('empty whole → empty string', () => {
+  assert.strictEqual(fmtMeasured('', '3/4'), '');
+});
+test('FRAC_OPTS covers all 8 options (none + 7 fractions)', () => {
+  assert.strictEqual(FRAC_OPTS.length, 8);
+});
+test('FRAC_OPTS values are in ascending order', () => {
+  const vals = FRAC_OPTS.map(f => f.val);
+  for (let i = 1; i < vals.length; i++) {
+    assert.ok(vals[i] > vals[i-1], `FRAC_OPTS not ascending at index ${i}`);
+  }
 });
 
 // ─── Summary ─────────────────────────────────────────────────────────────────

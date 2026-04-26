@@ -999,6 +999,8 @@
     /* Toggle switch */
     .toggle-wrap { display: flex; align-items: center; justify-content: space-between; }
     .section-header-row { display: flex; align-items: center; gap: 10px; }
+    .chip-disabled { opacity: 0.3; pointer-events: none; }
+    .dim-resolved { font-size: 13px; color: var(--amber); padding: 4px 0 0 2px; }
     .toggle-label { font-size: 15px; color: var(--text-1); }
     .toggle-switch {
       position: relative;
@@ -1439,19 +1441,58 @@ function getCatalogWarning() {
 /* ================================================================
    NEW QUOTE STATE HELPERS
 ================================================================ */
+/* Fraction values map for dimension entry */
+const FRAC_OPTS = [
+  { id: '',    label: '—',   val: 0      },
+  { id: '1/8', label: '⅛',  val: 1/8    },
+  { id: '1/4', label: '¼',  val: 1/4    },
+  { id: '3/8', label: '⅜',  val: 3/8    },
+  { id: '1/2', label: '½',  val: 1/2    },
+  { id: '5/8', label: '⅝',  val: 5/8    },
+  { id: '3/4', label: '¾',  val: 3/4    },
+  { id: '7/8', label: '⅞',  val: 7/8    },
+];
+
+/**
+ * Given a whole number (int) and fraction id string (e.g. '3/4'),
+ * returns the ceiling inch value used for pricing.
+ * Exact whole numbers are unchanged; any fraction causes ceiling.
+ */
+function resolveInches(whole, fracId) {
+  const w = parseInt(whole) || 0;
+  if (!w) return 0;
+  const frac = FRAC_OPTS.find(f => f.id === fracId);
+  const fracVal = frac ? frac.val : 0;
+  return fracVal === 0 ? w : w + 1; // any fraction → next whole inch
+}
+
+/**
+ * Human-readable measured value string, e.g. "23¾"
+ */
+function fmtMeasured(whole, fracId) {
+  if (!parseInt(whole)) return '';
+  const frac = FRAC_OPTS.find(f => f.id === fracId);
+  return `${whole}${frac && frac.label !== '—' ? frac.label : ''}`;
+}
+
 function freshPane(from) {
   return {
-    thickness: from?.thickness || '1/8"',
-    coating:   from?.coating   || 'clear',
-    finish:    from?.finish    || 'annealed',
-    grid:      'none',
-    shape:     'standard',
-    location:  '',
-    qty:       1,
-    width:     '',
-    height:    '',
-    unit:      from?.unit || 'in',
-    laborHrs:  1.0,
+    thickness:   from?.thickness  || '1/8"',
+    coating:     from?.coating    || 'clear',
+    finish:      from?.finish     || 'annealed',
+    grid:        'none',
+    shape:       'standard',
+    location:    '',
+    qty:         1,
+    // Dimension entry: whole + fraction → ceiling stored in width/height
+    widthWhole:  '',
+    widthFrac:   '',
+    heightWhole: '',
+    heightFrac:  '',
+    width:       0,   // ceiling value — used by calcPane
+    height:      0,   // ceiling value — used by calcPane
+    unit:        'in',
+    laborHrs:    1.0,
   };
 }
 
@@ -1482,7 +1523,7 @@ function draftJobCalc() {
 
 function draftCurrentPaneCalc() {
   const cp = app.draft?.currentPane;
-  if (!cp || !cp.thickness || !cp.coating || !cp.finish || !cp.width || !cp.height) return null;
+  if (!cp || !cp.thickness || !cp.coating || !cp.finish || !(cp.width > 0) || !(cp.height > 0)) return null;
   return calcPane(cp, app.draft.supplier);
 }
 
@@ -1664,13 +1705,13 @@ function renderNewQuoteStep1() {
   const jobCalc = draftJobCalc();
   const catalogWarn = getCatalogWarning();
 
-  const w_in = toIn(cp.width || 0, cp.unit);
-  const h_in = toIn(cp.height || 0, cp.unit);
-  const largePaneWarn = cp.width && cp.height && isLargePaneWarning(w_in, h_in);
+  const w_in = cp.width  || 0;
+  const h_in = cp.height || 0;
+  const largePaneWarn = w_in > 0 && h_in > 0 && isLargePaneWarning(w_in, h_in);
   const needsQuote = paneCalc?.requiresQuote;
 
   const canSave = cp.thickness && cp.coating && cp.finish &&
-                  parseFloat(cp.width) > 0 && parseFloat(cp.height) > 0 && !needsQuote && !largePaneWarn;
+                  cp.width > 0 && cp.height > 0 && !needsQuote && !largePaneWarn;
   const canReview = d.panes.length > 0;
 
   const today = new Date(d.jobDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
@@ -1773,23 +1814,32 @@ function renderNewQuoteStep1() {
         </div>
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;">
-        <div class="form-group">
-          <label class="form-label">Width <span style="text-transform:none;">(${cp.unit})</span></label>
-          <input class="form-input form-input-large" id="pane-width" type="number" inputmode="decimal" placeholder="0" value="${cp.width}" min="1" max="300" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Height <span style="text-transform:none;">(${cp.unit})</span></label>
-          <input class="form-input form-input-large" id="pane-height" type="number" inputmode="decimal" placeholder="0" value="${cp.height}" min="1" max="300" />
-        </div>
+      <div class="section-label mb-8">Dimensions <span style="text-transform:none;font-weight:400;color:var(--text-2);">(block measurement, in)</span></div>
+
+      <!-- WIDTH -->
+      <div class="form-group mb-4">
+        <label class="form-label">Width</label>
+        <input class="form-input form-input-large" id="pane-width-whole" type="number" inputmode="numeric"
+          placeholder="whole inches" value="${cp.widthWhole}" min="1" max="300"
+          style="max-width:160px;" />
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-        <span style="font-size:12px;color:var(--text-3);">Round to nearest inch (block measurement)</span>
-        <div class="unit-toggle" style="width:120px;">
-          <button class="unit-toggle-btn ${cp.unit==='in'?'active':''}" id="unit-in">IN</button>
-          <button class="unit-toggle-btn ${cp.unit==='cm'?'active':''}" id="unit-cm">CM</button>
-        </div>
+      <div class="chip-group mb-4" style="flex-wrap:wrap;">
+        ${FRAC_OPTS.map(f => `<div class="chip dim-frac-chip ${cp.widthFrac===f.id?'active':''} ${!cp.widthWhole?'chip-disabled':''}" data-dim="width" data-frac="${f.id}">${f.label}</div>`).join('')}
       </div>
+      ${cp.widthWhole ? `<div class="dim-resolved mb-12">→ <strong>${cp.width}"</strong>${cp.widthFrac ? ` <span style="color:var(--text-3);">(measured ${fmtMeasured(cp.widthWhole, cp.widthFrac)}")</span>` : ''}</div>` : '<div class="mb-12"></div>'}
+
+      <!-- HEIGHT -->
+      <div class="form-group mb-4">
+        <label class="form-label">Height</label>
+        <input class="form-input form-input-large" id="pane-height-whole" type="number" inputmode="numeric"
+          placeholder="whole inches" value="${cp.heightWhole}" min="1" max="300"
+          style="max-width:160px;" />
+      </div>
+      <div class="chip-group mb-4" style="flex-wrap:wrap;">
+        ${FRAC_OPTS.map(f => `<div class="chip dim-frac-chip ${cp.heightFrac===f.id?'active':''} ${!cp.heightWhole?'chip-disabled':''}" data-dim="height" data-frac="${f.id}">${f.label}</div>`).join('')}
+      </div>
+      ${cp.heightWhole ? `<div class="dim-resolved mb-16">→ <strong>${cp.height}"</strong>${cp.heightFrac ? ` <span style="color:var(--text-3);">(measured ${fmtMeasured(cp.heightWhole, cp.heightFrac)}")</span>` : ''}</div>` : '<div class="mb-16"></div>'}
+
       ${largePaneWarn?`<div class="alert alert-warning mb-12"><span class="alert-icon">⚠</span>Pane exceeds standard catalog size. Flag for office review.</div>`:''}
 
       <div class="section-label mb-8">Glass Thickness</div>
@@ -1832,7 +1882,7 @@ function renderNewQuoteStep1() {
         ${cp.qty>1?` <span style="color:var(--amber);">(×${cp.qty})</span>`:''}
       </div>
       <div class="price-row">
-        <span class="price-row-label">Glass (${paneCalc.sqft.toFixed(2)} sqft${gridMode!=='none'?' + grid':''}${cp.shape!=='standard'?' · '+PRICE_CATALOG.shapeMultipliers[cp.shape]+'×':''})</span>
+        <span class="price-row-label">Glass (${cp.width}" × ${cp.height}" = ${paneCalc.sqft.toFixed(2)} sqft${gridMode!=='none'?' + grid':''}${cp.shape!=='standard'?' · '+PRICE_CATALOG.shapeMultipliers[cp.shape]+'×':''})</span>
         <span class="price-row-value">${fmt(paneCalc.productCost)}</span>
       </div>
       <div class="price-row">
@@ -1895,7 +1945,7 @@ function renderNewQuoteStep2() {
         <div class="pane-item-num">${i+1}</div>
         <div class="pane-item-info">
           <div class="pane-item-type">${label}${p.location?' · <span style="color:var(--text-2);font-weight:400;">'+p.location+'</span>':''}</div>
-          <div class="pane-item-dims">${p.width}" × ${p.height}"${qty>1?' × '+qty:''}${r&&!r.requiresQuote?' · '+r.sqft.toFixed(2)+' sqft':''}</div>
+          <div class="pane-item-dims">${fmtMeasured(p.widthWhole||p.width, p.widthFrac||'')}" × ${fmtMeasured(p.heightWhole||p.height, p.heightFrac||'')}"${qty>1?' × '+qty:''}${r&&!r.requiresQuote?' · '+r.sqft.toFixed(2)+' sqft':''}</div>
           <div style="font-size:12px;color:var(--text-2);margin-top:2px;">
             ${r&&!r.requiresQuote?'Glass '+fmt(r.productCost)+' · Labor '+fmt(r.laborCost):'<span style="color:var(--orange);">⚑ Requires custom quote</span>'}
           </div>
@@ -2001,7 +2051,7 @@ function renderReview() {
           </div>
           <span style="font-family:var(--font-title);font-weight:800;font-size:16px;color:var(--text-0);">${r&&!r.requiresQuote?fmtRange(r.lineTotal):'—'}</span>
         </div>
-        <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">${p.width}" × ${p.height}"${r&&!r.requiresQuote?' · '+r.sqft.toFixed(2)+' sqft':''}</div>
+        <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">${fmtMeasured(p.widthWhole||p.width, p.widthFrac||'')}" × ${fmtMeasured(p.heightWhole||p.height, p.heightFrac||'')}"\u2009${p.widthFrac||p.heightFrac?`<span style="color:var(--text-3);">(priced at ${p.width}" × ${p.height}")</span>`:''} ${r&&!r.requiresQuote?'· '+r.sqft.toFixed(2)+' sqft':''}</div>
         <div class="divider-dashed"></div>
         <div class="price-row">
           <span class="price-row-label" style="font-size:13px;">Glass / Product${pGridMode!=='none'?' (incl. grid)':''}${p.shape&&p.shape!=='standard'?' · '+p.shape.replace(/_/g,' '):''}</span>
@@ -2441,7 +2491,7 @@ function renderCustomerView(quoteId) {
   ${lineItems.map((item, i) => `
   <div style="margin-bottom:16px;">
     <div class="cv-label">Pane ${i+1}${item.location?' — '+item.location:''} — ${getPaneLabel(item)}${(item.qty||1)>1?' (×'+item.qty+')':''}</div>
-    <div class="cv-line-item"><span class="cv-line-label">${item.width}" × ${item.height}"${item.sqft?' ('+item.sqft.toFixed(2)+' sqft)':''}</span><span class="cv-line-value">${item.productCost?fmt(item.productCost):'QUOTE'}</span></div>
+    <div class="cv-line-item"><span class="cv-line-label">${item.width}" × ${item.height}"${item.sqft?' ('+item.sqft.toFixed(2)+' sqft)':''}</span><span class="cv-line-value">${item.productCost ? fmt(item.productCost) : 'QUOTE'}</span></div>
     <div class="cv-line-item"><span class="cv-line-label">Labor</span><span class="cv-line-value">${item.laborCost?fmt(item.laborCost):'—'}</span></div>
   </div>
   `).join('')}
@@ -2523,13 +2573,47 @@ function attachEvents() {
     app._renderTimer = setTimeout(() => render(), 600);
   };
 
-  on('pane-location', 'input',  e => { app.draft.currentPane.location = e.target.value; });
-  // Width/height: update state on every keystroke, trigger render only on blur/Enter (change event)
-  // This prevents any mid-typing DOM rebuilds that cause flash and cursor loss
-  on('pane-width',    'input',  e => { app.draft.currentPane.width  = e.target.value; });
-  on('pane-height',   'input',  e => { app.draft.currentPane.height = e.target.value; });
-  on('pane-width',    'change', e => { app.draft.currentPane.width  = e.target.value; deferredRender(); });
-  on('pane-height',   'change', e => { app.draft.currentPane.height = e.target.value; deferredRender(); });
+  on('pane-location', 'input', e => { app.draft.currentPane.location = e.target.value; });
+
+  // Dimension entry — whole number inputs
+  // State update on every keystroke; render deferred to change event (blur/Enter)
+  on('pane-width-whole', 'input', e => {
+    const cp = app.draft.currentPane;
+    cp.widthWhole = e.target.value;
+    cp.width = resolveInches(cp.widthWhole, cp.widthFrac);
+  });
+  on('pane-width-whole', 'change', e => {
+    const cp = app.draft.currentPane;
+    cp.widthWhole = e.target.value;
+    cp.width = resolveInches(cp.widthWhole, cp.widthFrac);
+    deferredRender();
+  });
+  on('pane-height-whole', 'input', e => {
+    const cp = app.draft.currentPane;
+    cp.heightWhole = e.target.value;
+    cp.height = resolveInches(cp.heightWhole, cp.heightFrac);
+  });
+  on('pane-height-whole', 'change', e => {
+    const cp = app.draft.currentPane;
+    cp.heightWhole = e.target.value;
+    cp.height = resolveInches(cp.heightWhole, cp.heightFrac);
+    deferredRender();
+  });
+
+  // Fraction chips — only fire if whole number is present (chips disabled via CSS otherwise)
+  delegate('[data-dim][data-frac]', 'click', e => {
+    const cp  = app.draft.currentPane;
+    const dim  = e.currentTarget.dataset.dim;
+    const frac = e.currentTarget.dataset.frac;
+    if (dim === 'width') {
+      cp.widthFrac = frac;
+      cp.width = resolveInches(cp.widthWhole, cp.widthFrac);
+    } else {
+      cp.heightFrac = frac;
+      cp.height = resolveInches(cp.heightWhole, cp.heightFrac);
+    }
+    render();
+  });
 
   // Qty stepper — update span directly to avoid full DOM rebuild flash
   on('qty-dec', 'click', () => {
@@ -2563,27 +2647,6 @@ function attachEvents() {
     deferredRender();
   });
 
-  // Unit toggle
-  on('unit-in', 'click', () => {
-    const cp = app.draft.currentPane;
-    if (cp.unit !== 'in') {
-      const w = parseFloat(cp.width), h = parseFloat(cp.height);
-      if (w) cp.width  = (w * 0.393701).toFixed(1);
-      if (h) cp.height = (h * 0.393701).toFixed(1);
-      cp.unit = 'in';
-      render();
-    }
-  });
-  on('unit-cm', 'click', () => {
-    const cp = app.draft.currentPane;
-    if (cp.unit !== 'cm') {
-      const w = parseFloat(cp.width), h = parseFloat(cp.height);
-      if (w) cp.width  = (w / 0.393701).toFixed(1);
-      if (h) cp.height = (h / 0.393701).toFixed(1);
-      cp.unit = 'cm';
-      render();
-    }
-  });
 
   // Glass spec chips
   delegate('[data-thickness]', 'click', e => { app.draft.currentPane.thickness = e.currentTarget.dataset.thickness; render(); });
@@ -2608,7 +2671,7 @@ function attachEvents() {
     if (d.editingPaneIdx === null || d.editingPaneIdx === undefined) return false;
     const stored = d.panes[d.editingPaneIdx];
     const cp = d.currentPane;
-    const keys = ['thickness','coating','finish','grid','shape','location','qty','width','height','unit','laborHrs'];
+    const keys = ['thickness','coating','finish','grid','shape','location','qty','width','height','widthWhole','widthFrac','heightWhole','heightFrac','laborHrs'];
     return keys.some(k => String(cp[k]) !== String(stored[k]));
   };
 
@@ -2671,7 +2734,7 @@ function attachEvents() {
     const cp = d.currentPane;
     const isEditing = d.editingPaneIdx !== null && d.editingPaneIdx !== undefined;
     if (!isEditing && cp.thickness && cp.coating && cp.finish &&
-        parseFloat(cp.width) > 0 && parseFloat(cp.height) > 0) {
+        cp.width > 0 && cp.height > 0) {
       const r = draftCurrentPaneCalc();
       if (r && !r.requiresQuote) {
         d.panes.push({ id: genPaneId(), ...cp });
