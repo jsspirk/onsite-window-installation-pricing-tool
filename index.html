@@ -3171,6 +3171,8 @@ async function handleLogin() {
     role: profile?.role || 'tech',
   };
 
+  await loadConfig();
+  applyBranding();
   navigate('home');
 }
 
