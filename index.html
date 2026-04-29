@@ -1832,10 +1832,11 @@ function renderLogin() {
 function renderHome() {
   const u = app.currentUser;
   const brand = getBrand();
+  const isAdmin = u.role === 'admin';
   const myQuotes = appData.quotes
-    .filter(q => q.techId === u.id)
+    .filter(q => isAdmin || q.techId === u.id)
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .slice(0, 3);
+    .slice(0, isAdmin ? 10 : 3);
 
   const catalogWarn = getCatalogWarning();
 
@@ -1864,7 +1865,7 @@ function renderHome() {
 
   <div class="scroll-content scroll-content-pb">
     <div class="flex-between mb-12 mt-4">
-      <span class="section-label">Recent Quotes</span>
+      <span class="section-label">${isAdmin ? 'All Quotes' : 'Recent Quotes'}</span>
       ${myQuotes.length > 0 ? `<button class="btn btn-ghost btn-sm" id="view-all-history">View All</button>` : ''}
     </div>
 
@@ -1874,7 +1875,7 @@ function renderHome() {
         <div class="empty-title">No quotes yet</div>
         <div class="empty-sub">Tap "New Quote" to generate your first estimate.</div>
       </div>
-    ` : myQuotes.map(q => renderHistoryItem(q)).join('')}
+    ` : myQuotes.map(q => renderHistoryItem(q, isAdmin)).join('')}
 
     ${u.role === 'admin' ? `
       <div class="divider"></div>
@@ -2204,11 +2205,11 @@ function renderReview() {
   return `
 <div class="screen" style="background:var(--bg-0);">
   <div class="app-header">
-    <button class="header-back-btn" id="back-to-pane-list">←</button>
-    <div class="header-title">Quote Review</div>
+    <button class="header-back-btn" id="${d.isAdminEdit ? 'back-to-admin-log' : 'back-to-pane-list'}">←</button>
+    <div class="header-title">${d.isAdminEdit ? 'Edit Quote' : 'Quote Review'}</div>
     <div class="header-right">${connBadge()}</div>
   </div>
-  ${stepIndicator(2)}
+  ${d.isAdminEdit ? '' : stepIndicator(2)}
 
   <div class="scroll-content" style="padding-bottom:160px;">
     <!-- Customer -->
@@ -2298,6 +2299,24 @@ function renderReview() {
   </div>
 
   <!-- Action Bar -->
+  ${d.isAdminEdit ? `
+  <div class="action-bar" style="flex-direction:column;gap:10px;">
+    <div style="font-size:12px;color:var(--text-2);font-family:var(--font-semi);font-weight:600;letter-spacing:0.05em;">QUOTE STATUS</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      ${['draft','sent','shown','flagged'].map(s => `
+        <button class="chip ${d.status===s?'active':''}" data-admin-status="${s}" style="min-height:36px;font-size:13px;padding:0 14px;">${s}</button>
+      `).join('')}
+    </div>
+    <div style="display:flex;gap:8px;margin-top:2px;">
+      <button class="btn btn-ghost btn-sm" id="admin-delete-btn" style="flex:1;color:var(--red);border-color:var(--red);">
+        🗑 Delete
+      </button>
+      <button class="btn btn-primary" id="admin-edit-save" style="flex:2;">
+        ✓ Save Changes
+      </button>
+    </div>
+  </div>
+  ` : `
   <div class="action-bar" style="flex-direction:column;gap:8px;">
     <div style="display:flex;gap:8px;">
       <button class="btn btn-secondary" id="show-customer-btn" style="flex:1;">
@@ -2311,6 +2330,7 @@ function renderReview() {
       ⚑ Flag for Office Review
     </button>
   </div>
+  `}
 
   <!-- Send Modal -->
   ${app.sendModal ? renderSendModal(jobCalc) : ''}
@@ -2634,6 +2654,7 @@ function renderAdminQuoteLog() {
           <th>Customer</th>
           <th>Total</th>
           <th>Status</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
@@ -2646,6 +2667,10 @@ function renderAdminQuoteLog() {
             <td style="font-size:14px;font-weight:600;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${q.customerName || '—'}</td>
             <td style="font-family:var(--font-title);font-weight:700;font-size:16px;color:var(--amber);">${fmt(q.grandTotal)}</td>
             <td><span class="badge ${statusMap[q.status] || 'badge-draft'}">${q.status}</span></td>
+            <td style="white-space:nowrap;">
+              <button class="btn btn-secondary btn-sm" data-admin-edit-quote="${q.id}" style="font-size:12px;padding:4px 10px;margin-right:4px;">Edit</button>
+              <button class="btn btn-ghost btn-sm" data-admin-delete-quote="${q.id}" style="font-size:12px;padding:4px 10px;color:var(--red);border-color:var(--red);">Del</button>
+            </td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -3160,6 +3185,11 @@ function attachEvents() {
     app.draft.step = 2;
     navigate('new-quote');
   });
+  on('back-to-admin-log', 'click', () => {
+    app.draft = null;
+    app.activeTab = 3;
+    navigate('admin');
+  });
 
   on('review-tools', 'input', e => { if (app.draft) app.draft.toolsRequired = e.target.value; });
   on('review-notes', 'input', e => { if (app.draft) app.draft.notes = e.target.value; });
@@ -3205,6 +3235,24 @@ function attachEvents() {
     app.draft.contactType = type;
     const finalQuote = finalizeDraft('sent');
     navigate('sent', { quoteId: finalQuote.id });
+  });
+
+  // Admin edit actions
+  on('admin-edit-save', 'click', () => saveAdminEdit());
+  on('admin-delete-btn', 'click', () => {
+    if (app.draft?.isAdminEdit) deleteAdminQuote(app.draft.id);
+  });
+  delegate('[data-admin-status]', 'click', e => {
+    if (app.draft?.isAdminEdit) {
+      app.draft.status = e.currentTarget.dataset.adminStatus;
+      render();
+    }
+  });
+  delegate('[data-admin-edit-quote]', 'click', e => {
+    viewQuoteFromHistory(e.currentTarget.dataset.adminEditQuote, true);
+  });
+  delegate('[data-admin-delete-quote]', 'click', e => {
+    deleteAdminQuote(e.currentTarget.dataset.adminDeleteQuote);
   });
 
   // ---- SENT ----
@@ -3336,10 +3384,9 @@ function finalizeDraft(status) {
 /* ================================================================
    VIEW QUOTE FROM HISTORY (REOPEN)
 ================================================================ */
-function viewQuoteFromHistory(quoteId) {
+function viewQuoteFromHistory(quoteId, isAdminEdit = false) {
   const q = appData.quotes.find(x => x.id === quoteId);
   if (!q) return;
-  // Rebuild a draft from the historical quote for re-presentation
   app.draft = {
     id: q.id,
     customerName: q.customerName || '',
@@ -3356,8 +3403,47 @@ function viewQuoteFromHistory(quoteId) {
     step: 3,
     catalogVersion: q.catalogVersion,
     status: q.status,
+    techId: q.techId,
+    techName: q.techName,
+    isAdminEdit: isAdminEdit,
   };
   navigate('review');
+}
+
+/* ================================================================
+   ADMIN EDIT / DELETE
+================================================================ */
+async function saveAdminEdit() {
+  const d = app.draft;
+  if (!d || !d.isAdminEdit) return;
+  const jobCalc = calcJob(d.panes, d.supplier);
+  const updated = {
+    ...d,
+    totalProduct:   jobCalc.totalProduct,
+    totalLabor:     jobCalc.totalLabor,
+    totalMaterials: jobCalc.totalMaterials,
+    grandTotal:     jobCalc.grandTotal,
+  };
+  // Update in-memory store
+  appData.quotes = appData.quotes.map(q => q.id === updated.id ? updated : q);
+  saveState(appData);
+  app.draft = null;
+  syncQuoteToSupabase(updated, updated.panes); // fire-and-forget
+  app.activeTab = 3; // return to Quote Log tab
+  navigate('admin');
+}
+
+async function deleteAdminQuote(quoteId) {
+  if (!confirm('Permanently delete this quote? This cannot be undone.')) return;
+  appData.quotes = appData.quotes.filter(q => q.id !== quoteId);
+  saveState(appData);
+  app.draft = null;
+  if (app.isOnline) {
+    await sb.from('panes').delete().eq('quote_id', quoteId);
+    await sb.from('quotes').delete().eq('id', quoteId);
+  }
+  app.activeTab = 3;
+  navigate('admin');
 }
 
 /* ================================================================
