@@ -1311,6 +1311,16 @@ const app = {
   customerViewQuoteId: null,
 };
 
+// Shared config — loaded from Supabase app_config, localStorage cache as offline fallback
+let appConfig = {
+  brand_name:            'FastGlass',
+  brand_color:           null,
+  brand_logo_square_url: null,
+  brand_logo_horiz_url:  null,
+  default_supplier:      'busick',
+  range_band:            0.08,
+};
+
 /* ================================================================
    PRICING ENGINE
    Formula: sellPrice = SF × (rawRate + gridAdder) × markup × shapeMult × 3 + laborHrs × $200
@@ -1378,6 +1388,35 @@ function calcJob(panes, supplier) {
 function toIn(v, unit) { return unit === 'cm' ? parseFloat(v) * 0.393701 : parseFloat(v); }
 
 /* ================================================================
+   CONFIG — load from Supabase, cache locally for offline use
+================================================================ */
+async function loadConfig() {
+  try {
+    const { data, error } = await sb.from('app_config').select('*').eq('id', 1).single();
+    if (data && !error) {
+      Object.assign(appConfig, data);
+      localStorage.setItem('fg_config_cache', JSON.stringify(appConfig));
+      return;
+    }
+  } catch (e) { console.warn('Config fetch failed', e); }
+  // Offline: restore from cache
+  try {
+    const cached = localStorage.getItem('fg_config_cache');
+    if (cached) Object.assign(appConfig, JSON.parse(cached));
+  } catch {}
+}
+
+async function saveConfig(updates) {
+  Object.assign(appConfig, updates);
+  localStorage.setItem('fg_config_cache', JSON.stringify(appConfig));
+  await sb.from('app_config').update({
+    ...updates,
+    updated_at: new Date().toISOString(),
+    updated_by: app.currentUser?.id,
+  }).eq('id', 1);
+}
+
+/* ================================================================
    ROUTING
 ================================================================ */
 function navigate(route, params = {}) {
@@ -1393,7 +1432,7 @@ function navigate(route, params = {}) {
    HELPERS
 ================================================================ */
 function getDefaultSupplier() {
-  return localStorage.getItem('fg_default_supplier') || 'busick';
+  return appConfig.default_supplier || 'busick';
 }
 
 function fmt(n) {
@@ -1401,7 +1440,7 @@ function fmt(n) {
 }
 
 function fmtRange(n) {
-  const band = parseFloat(localStorage.getItem('fg_range_band') || '0.08');
+  const band = appConfig.range_band || 0.08;
   const low  = Math.max(400, n * (1 - band));
   const high = n * (1 + band);
   return `${fmt(low)} \u2013 ${fmt(high)}`;
@@ -1455,10 +1494,10 @@ function getCatalogWarning() {
 ================================================================ */
 function getBrand() {
   return {
-    name:      localStorage.getItem('fg_brand_name')        || 'FastGlass',
-    color:     localStorage.getItem('fg_brand_color')       || null,
-    logoSq:    localStorage.getItem('fg_brand_logo_square') || null,
-    logoHoriz: localStorage.getItem('fg_brand_logo_horiz')  || null,
+    name:      appConfig.brand_name            || 'FastGlass',
+    color:     appConfig.brand_color           || null,
+    logoSq:    appConfig.brand_logo_square_url || null,
+    logoHoriz: appConfig.brand_logo_horiz_url  || null,
   };
 }
 
@@ -1478,7 +1517,7 @@ function darkenHex(hex, factor) {
 }
 
 function applyBranding() {
-  const color = localStorage.getItem('fg_brand_color');
+  const color = appConfig.brand_color;
   const root = document.documentElement.style;
   root.removeProperty('--amber');
   root.removeProperty('--amber-dim');
@@ -2404,8 +2443,8 @@ function renderAdminGlassTypes() {
 
 function renderAdminLabor() {
   const laborRate      = PRICE_CATALOG.laborRate;
-  const defaultSupplier = localStorage.getItem('fg_default_supplier') || 'busick';
-  const rangeBand      = localStorage.getItem('fg_range_band') || '0.08';
+  const defaultSupplier = appConfig.default_supplier || 'busick';
+  const rangeBand      = String(appConfig.range_band ?? 0.08);
   const SUPPLIER_OPTS  = Object.entries(PRICE_CATALOG.suppliers).map(([id,s])=>({id, name:s.name}));
   const BAND_OPTS      = [
     {id:'0.05', label:'±5%'},
@@ -2798,21 +2837,20 @@ function attachEvents() {
   delegate('[data-shape]',     'click', e => { app.draft.currentPane.shape     = e.currentTarget.dataset.shape;     render(); });
   delegate('[data-grid]',      'click', e => { app.draft.currentPane.grid      = e.currentTarget.dataset.grid;      render(); });
 
-  // Admin settings (only active on admin screen)
-  delegate('[data-admin-supplier]', 'click', e => {
-    localStorage.setItem('fg_default_supplier', e.currentTarget.dataset.adminSupplier);
+  // Admin settings — write to Supabase, update appConfig in memory
+  delegate('[data-admin-supplier]', 'click', async e => {
+    await saveConfig({ default_supplier: e.currentTarget.dataset.adminSupplier });
     render();
   });
-  delegate('[data-admin-band]', 'click', e => {
-    localStorage.setItem('fg_range_band', e.currentTarget.dataset.adminBand);
+  delegate('[data-admin-band]', 'click', async e => {
+    await saveConfig({ range_band: parseFloat(e.currentTarget.dataset.adminBand) });
     render();
   });
 
   // ---- BRANDING ----
-  on('brand-name-save', 'click', () => {
-    const val = document.getElementById('brand-name-input')?.value.trim();
-    if (val) localStorage.setItem('fg_brand_name', val);
-    else localStorage.removeItem('fg_brand_name');
+  on('brand-name-save', 'click', async () => {
+    const val = document.getElementById('brand-name-input')?.value.trim() || 'FastGlass';
+    await saveConfig({ brand_name: val });
     render();
   });
 
@@ -2833,52 +2871,55 @@ function attachEvents() {
       if (preview) preview.style.background = hex;
     }
   });
-  on('brand-color-save', 'click', () => {
+  on('brand-color-save', 'click', async () => {
     const hex = document.getElementById('brand-color-hex')?.value.trim();
-    if (!/^#[0-9a-fA-F]{6}$/.test(hex)) {
-      alert('Enter a valid hex color, e.g. #F59E0B');
-      return;
-    }
-    localStorage.setItem('fg_brand_color', hex);
+    if (!/^#[0-9a-fA-F]{6}$/.test(hex)) { alert('Enter a valid hex color, e.g. #F59E0B'); return; }
+    await saveConfig({ brand_color: hex });
     applyBranding();
     render();
   });
-  on('brand-color-reset', 'click', () => {
-    localStorage.removeItem('fg_brand_color');
+  on('brand-color-reset', 'click', async () => {
+    await saveConfig({ brand_color: null });
     applyBranding();
     render();
   });
 
-  // Logo uploads — FileReader → base64 → localStorage
-  on('brand-logo-sq-upload', 'change', e => {
+  // Logo uploads — Supabase Storage → public URL → app_config
+  on('brand-logo-sq-upload', 'change', async e => {
     const file = e.target.files[0];
     if (!file) return;
     if (file.size > 500 * 1024) { alert('Logo must be under 500 KB.'); e.target.value = ''; return; }
-    const reader = new FileReader();
-    reader.onload = ev => { localStorage.setItem('fg_brand_logo_square', ev.target.result); render(); };
-    reader.readAsDataURL(file);
+    const ext  = file.name.split('.').pop();
+    const { error } = await sb.storage.from('brand-assets').upload(`logos/square.${ext}`, file, { upsert: true });
+    if (error) { alert('Upload failed: ' + error.message); return; }
+    const { data: { publicUrl } } = sb.storage.from('brand-assets').getPublicUrl(`logos/square.${ext}`);
+    await saveConfig({ brand_logo_square_url: publicUrl });
+    render();
   });
-  on('brand-logo-sq-remove', 'click', () => {
-    localStorage.removeItem('fg_brand_logo_square');
+  on('brand-logo-sq-remove', 'click', async () => {
+    await saveConfig({ brand_logo_square_url: null });
     render();
   });
 
-  on('brand-logo-horiz-upload', 'change', e => {
+  on('brand-logo-horiz-upload', 'change', async e => {
     const file = e.target.files[0];
     if (!file) return;
     if (file.size > 500 * 1024) { alert('Logo must be under 500 KB.'); e.target.value = ''; return; }
-    const reader = new FileReader();
-    reader.onload = ev => { localStorage.setItem('fg_brand_logo_horiz', ev.target.result); render(); };
-    reader.readAsDataURL(file);
+    const ext  = file.name.split('.').pop();
+    const { error } = await sb.storage.from('brand-assets').upload(`logos/horiz.${ext}`, file, { upsert: true });
+    if (error) { alert('Upload failed: ' + error.message); return; }
+    const { data: { publicUrl } } = sb.storage.from('brand-assets').getPublicUrl(`logos/horiz.${ext}`);
+    await saveConfig({ brand_logo_horiz_url: publicUrl });
+    render();
   });
-  on('brand-logo-horiz-remove', 'click', () => {
-    localStorage.removeItem('fg_brand_logo_horiz');
+  on('brand-logo-horiz-remove', 'click', async () => {
+    await saveConfig({ brand_logo_horiz_url: null });
     render();
   });
 
-  on('brand-reset-all', 'click', () => {
-    if (!confirm('Reset all branding to FastGlass defaults? This removes your logos, brand name, and color.')) return;
-    ['fg_brand_name', 'fg_brand_color', 'fg_brand_logo_square', 'fg_brand_logo_horiz'].forEach(k => localStorage.removeItem(k));
+  on('brand-reset-all', 'click', async () => {
+    if (!confirm('Reset all branding to defaults? This removes your logos, brand name, and color.')) return;
+    await saveConfig({ brand_name: 'FastGlass', brand_color: null, brand_logo_square_url: null, brand_logo_horiz_url: null });
     applyBranding();
     render();
   });
@@ -3232,6 +3273,8 @@ async function init() {
   } catch (e) {
     console.warn('Session restore failed', e);
   }
+  await loadConfig();
+  applyBranding();
   render();
 }
 
@@ -3244,10 +3287,14 @@ sb.auth.onAuthStateChange((event) => {
   }
 });
 
-// Apply saved theme and branding before first render to avoid flash
+// Apply saved theme + cached branding before first render to avoid flash
 (function() {
   const saved = localStorage.getItem('fg_theme') || 'dark';
   document.documentElement.dataset.theme = saved;
+  try {
+    const cached = localStorage.getItem('fg_config_cache');
+    if (cached) Object.assign(appConfig, JSON.parse(cached));
+  } catch {}
   applyBranding();
 })();
 
