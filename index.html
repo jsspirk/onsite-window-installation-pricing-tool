@@ -1442,6 +1442,48 @@ function getCatalogWarning() {
 }
 
 /* ================================================================
+   BRANDING HELPERS
+================================================================ */
+function getBrand() {
+  return {
+    name:      localStorage.getItem('fg_brand_name')        || 'FastGlass',
+    color:     localStorage.getItem('fg_brand_color')       || null,
+    logoSq:    localStorage.getItem('fg_brand_logo_square') || null,
+    logoHoriz: localStorage.getItem('fg_brand_logo_horiz')  || null,
+  };
+}
+
+function hexToRgb(hex) {
+  const h = hex.replace('#', '');
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16),
+  };
+}
+
+function darkenHex(hex, factor) {
+  const { r, g, b } = hexToRgb(hex);
+  const d = v => Math.max(0, Math.min(255, Math.round(v * factor))).toString(16).padStart(2, '0');
+  return `#${d(r)}${d(g)}${d(b)}`;
+}
+
+function applyBranding() {
+  const color = localStorage.getItem('fg_brand_color');
+  const root = document.documentElement.style;
+  root.removeProperty('--amber');
+  root.removeProperty('--amber-dim');
+  root.removeProperty('--amber-glow');
+  root.removeProperty('--amber-bg');
+  if (!color || !/^#[0-9a-fA-F]{6}$/.test(color)) return;
+  const { r, g, b } = hexToRgb(color);
+  root.setProperty('--amber',      color);
+  root.setProperty('--amber-dim',  darkenHex(color, 0.70));
+  root.setProperty('--amber-glow', `rgba(${r},${g},${b},0.15)`);
+  root.setProperty('--amber-bg',   `rgba(${r},${g},${b},0.08)`);
+}
+
+/* ================================================================
    NEW QUOTE STATE HELPERS
 ================================================================ */
 /* Fraction values map for dimension entry */
@@ -1580,11 +1622,13 @@ function connBadge() {
    SCREEN: LOGIN
 ================================================================ */
 function renderLogin() {
+  const brand = getBrand();
   return `
 <div class="login-screen screen">
   <div class="login-logo-area">
-    <div class="login-logo-mark">🪟</div>
-    <div class="login-brand">FastGlass</div>
+    ${brand.logoSq
+      ? `<img src="${brand.logoSq}" alt="${brand.name}" style="width:80px;height:80px;object-fit:contain;margin-bottom:8px;" />`
+      : `<div class="login-logo-mark">🪟</div><div class="login-brand">${brand.name}</div>`}
     <div class="login-tagline">Field Pricing Tool</div>
   </div>
 
@@ -1611,7 +1655,7 @@ function renderLogin() {
       ${connBadge()}
     </div>
     <p style="text-align:center; font-size:12px; color:var(--text-3); margin-top:16px;">
-      FastGlass Field Pricer v${APP_VERSION}<br>
+      ${brand.name} Field Pricer v${APP_VERSION}<br>
       <span style="color:var(--orange); font-size:11px;">⚠ Prototype — catalog rates are placeholder values</span>
     </p>
   </div>
@@ -1623,6 +1667,7 @@ function renderLogin() {
 ================================================================ */
 function renderHome() {
   const u = app.currentUser;
+  const brand = getBrand();
   const myQuotes = appData.quotes
     .filter(q => q.techId === u.id)
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
@@ -1633,7 +1678,9 @@ function renderHome() {
   return `
 <div class="screen" style="background:var(--bg-0);">
   <div class="app-header">
-    <div class="header-logo">FastGlass</div>
+    ${brand.logoHoriz
+      ? `<img src="${brand.logoHoriz}" alt="${brand.name}" style="height:28px;max-width:130px;object-fit:contain;" />`
+      : `<div class="header-logo">${brand.name}</div>`}
     <div class="header-right">
       ${connBadge()}
       ${u.role === 'admin' ? `<button class="icon-btn" id="home-admin-btn" title="Admin Panel">⚙️</button>` : ''}
@@ -2155,11 +2202,14 @@ function renderSendModal(jobCalc) {
 ================================================================ */
 function renderSent() {
   const q = appData.quotes.find(x => x.id === app.routeParams.quoteId);
+  const brand = getBrand();
   if (!q) return '';
   return `
 <div class="screen" style="background:var(--bg-0);">
   <div class="app-header">
-    <div class="header-logo">FastGlass</div>
+    ${brand.logoHoriz
+      ? `<img src="${brand.logoHoriz}" alt="${brand.name}" style="height:28px;max-width:130px;object-fit:contain;" />`
+      : `<div class="header-logo">${brand.name}</div>`}
     <div class="header-right">${connBadge()}</div>
   </div>
 
@@ -2263,7 +2313,7 @@ function renderHistoryItem(q, showTech = false) {
    SCREEN: ADMIN
 ================================================================ */
 function renderAdmin() {
-  const tabs = ['Glass Types', 'Labor & Mods', 'Materials', 'Quote Log'];
+  const tabs = ['Glass Types', 'Labor & Mods', 'Materials', 'Quote Log', 'Branding'];
   const t = app.activeTab;
   return `
 <div class="screen" style="background:var(--bg-0);">
@@ -2284,6 +2334,7 @@ function renderAdmin() {
     ${t === 1 ? renderAdminLabor() : ''}
     ${t === 2 ? renderAdminMaterials() : ''}
     ${t === 3 ? renderAdminQuoteLog() : ''}
+    ${t === 4 ? renderAdminBranding() : ''}
   </div>
 </div>`;
 }
@@ -2440,6 +2491,86 @@ function renderAdminQuoteLog() {
 }
 
 /* ================================================================
+   ADMIN TAB: BRANDING
+================================================================ */
+function renderAdminBranding() {
+  const brand = getBrand();
+  const colorVal = brand.color || '#F59E0B';
+  return `
+<div>
+  <!-- Company Name -->
+  <div class="section-label mb-8">Company Name</div>
+  <div style="font-size:13px;color:var(--text-2);margin-bottom:10px;">
+    Replaces "FastGlass" throughout the app wherever no logo is uploaded.
+  </div>
+  <div class="card mb-16" style="display:flex;gap:10px;align-items:center;">
+    <input class="form-input" id="brand-name-input" value="${brand.name}" placeholder="FastGlass" style="flex:1;" />
+    <button class="btn btn-secondary btn-sm" id="brand-name-save" style="white-space:nowrap;">Save</button>
+  </div>
+
+  <!-- Primary Brand Color -->
+  <div class="section-label mb-8">Primary Brand Color</div>
+  <div style="font-size:13px;color:var(--text-2);margin-bottom:10px;">
+    Applied to buttons, price displays, active chips, and accent elements. A darker shade is auto-derived for hover/dim states.
+  </div>
+  <div class="card mb-16">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;">
+      <input type="color" id="brand-color-picker" value="${colorVal}"
+        style="width:52px;height:52px;border:none;border-radius:var(--radius-sm);cursor:pointer;background:none;padding:2px;flex-shrink:0;" />
+      <input class="form-input" id="brand-color-hex" value="${colorVal}"
+        placeholder="#F59E0B" maxlength="7"
+        style="flex:1;font-family:monospace;letter-spacing:1px;" />
+      <div id="brand-color-preview"
+        style="width:52px;height:52px;border-radius:var(--radius-sm);background:${colorVal};flex-shrink:0;border:1px solid var(--border-0);"></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-secondary btn-sm" id="brand-color-save">Apply Color</button>
+      ${brand.color ? `<button class="btn btn-ghost btn-sm" id="brand-color-reset">Reset to Default</button>` : ''}
+    </div>
+  </div>
+
+  <!-- Square Logo -->
+  <div class="section-label mb-8">Square Logo</div>
+  <div style="font-size:13px;color:var(--text-2);margin-bottom:10px;">
+    Shown on the login screen. PNG recommended, max 500 KB.
+  </div>
+  <div class="card mb-16">
+    ${brand.logoSq ? `
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
+      <img src="${brand.logoSq}" alt="Square logo preview"
+        style="width:72px;height:72px;object-fit:contain;border-radius:var(--radius-md);background:var(--bg-2);padding:6px;border:1px solid var(--border-0);" />
+      <button class="btn btn-danger btn-sm" id="brand-logo-sq-remove">Remove</button>
+    </div>` : ''}
+    <label class="btn btn-secondary btn-sm" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+      ${brand.logoSq ? 'Replace Logo' : '↑ Upload Logo'}
+      <input type="file" id="brand-logo-sq-upload" accept="image/png,image/jpeg,image/svg+xml,image/webp" style="display:none;" />
+    </label>
+  </div>
+
+  <!-- Horizontal Logo -->
+  <div class="section-label mb-8">Horizontal Logo</div>
+  <div style="font-size:13px;color:var(--text-2);margin-bottom:10px;">
+    Shown in the app header and on customer-facing quotes. PNG recommended, max 500 KB.
+  </div>
+  <div class="card mb-16">
+    ${brand.logoHoriz ? `
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
+      <img src="${brand.logoHoriz}" alt="Horizontal logo preview"
+        style="height:44px;max-width:220px;object-fit:contain;background:var(--bg-2);padding:6px;border-radius:var(--radius-sm);border:1px solid var(--border-0);" />
+      <button class="btn btn-danger btn-sm" id="brand-logo-horiz-remove">Remove</button>
+    </div>` : ''}
+    <label class="btn btn-secondary btn-sm" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+      ${brand.logoHoriz ? 'Replace Logo' : '↑ Upload Logo'}
+      <input type="file" id="brand-logo-horiz-upload" accept="image/png,image/jpeg,image/svg+xml,image/webp" style="display:none;" />
+    </label>
+  </div>
+
+  <!-- Reset all -->
+  <button class="btn btn-danger btn-full" id="brand-reset-all">Reset All Branding to Defaults</button>
+</div>`;
+}
+
+/* ================================================================
    SCREEN: CUSTOMER VIEW (PRESENTATION MODE)
 ================================================================ */
 function renderCustomerView(quoteId) {
@@ -2470,11 +2601,16 @@ function renderCustomerView(quoteId) {
     return { ...p, ...(r && !r.requiresQuote ? r : {}), idx: i };
   });
 
+  const brand = getBrand();
   return `
 <div class="customer-view">
   <button class="cv-close" id="cv-close-btn">✕</button>
 
-  <div class="cv-logo">FastGlass</div>
+  <div class="cv-logo">
+    ${brand.logoHoriz
+      ? `<img src="${brand.logoHoriz}" alt="${brand.name}" style="height:36px;max-width:200px;object-fit:contain;" />`
+      : brand.name}
+  </div>
   <div class="cv-subtitle">Window Pane Replacement Estimate</div>
 
   <div class="cv-label">Customer</div>
@@ -2504,7 +2640,7 @@ function renderCustomerView(quoteId) {
   </div>
 
   <div class="cv-disclaimer">
-    This is an estimate only and is subject to final inspection upon completion of work. Actual costs may vary based on unforeseen conditions discovered during installation. This estimate does not constitute a binding contract. FastGlass reserves the right to adjust pricing based on final inspection findings. Does not include applicable taxes.
+    This is an estimate only and is subject to final inspection upon completion of work. Actual costs may vary based on unforeseen conditions discovered during installation. This estimate does not constitute a binding contract. ${brand.name} reserves the right to adjust pricing based on final inspection findings. Does not include applicable taxes.
   </div>
 </div>`;
 }
@@ -2659,6 +2795,81 @@ function attachEvents() {
   });
   delegate('[data-admin-band]', 'click', e => {
     localStorage.setItem('fg_range_band', e.currentTarget.dataset.adminBand);
+    render();
+  });
+
+  // ---- BRANDING ----
+  on('brand-name-save', 'click', () => {
+    const val = document.getElementById('brand-name-input')?.value.trim();
+    if (val) localStorage.setItem('fg_brand_name', val);
+    else localStorage.removeItem('fg_brand_name');
+    render();
+  });
+
+  // Color picker and hex input stay in sync live; Apply button commits
+  on('brand-color-picker', 'input', e => {
+    const hex = e.target.value;
+    const hexInput = document.getElementById('brand-color-hex');
+    const preview  = document.getElementById('brand-color-preview');
+    if (hexInput) hexInput.value = hex;
+    if (preview)  preview.style.background = hex;
+  });
+  on('brand-color-hex', 'input', e => {
+    const hex = e.target.value;
+    if (/^#[0-9a-fA-F]{6}$/.test(hex)) {
+      const picker  = document.getElementById('brand-color-picker');
+      const preview = document.getElementById('brand-color-preview');
+      if (picker)  picker.value = hex;
+      if (preview) preview.style.background = hex;
+    }
+  });
+  on('brand-color-save', 'click', () => {
+    const hex = document.getElementById('brand-color-hex')?.value.trim();
+    if (!/^#[0-9a-fA-F]{6}$/.test(hex)) {
+      alert('Enter a valid hex color, e.g. #F59E0B');
+      return;
+    }
+    localStorage.setItem('fg_brand_color', hex);
+    applyBranding();
+    render();
+  });
+  on('brand-color-reset', 'click', () => {
+    localStorage.removeItem('fg_brand_color');
+    applyBranding();
+    render();
+  });
+
+  // Logo uploads — FileReader → base64 → localStorage
+  on('brand-logo-sq-upload', 'change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 500 * 1024) { alert('Logo must be under 500 KB.'); e.target.value = ''; return; }
+    const reader = new FileReader();
+    reader.onload = ev => { localStorage.setItem('fg_brand_logo_square', ev.target.result); render(); };
+    reader.readAsDataURL(file);
+  });
+  on('brand-logo-sq-remove', 'click', () => {
+    localStorage.removeItem('fg_brand_logo_square');
+    render();
+  });
+
+  on('brand-logo-horiz-upload', 'change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 500 * 1024) { alert('Logo must be under 500 KB.'); e.target.value = ''; return; }
+    const reader = new FileReader();
+    reader.onload = ev => { localStorage.setItem('fg_brand_logo_horiz', ev.target.result); render(); };
+    reader.readAsDataURL(file);
+  });
+  on('brand-logo-horiz-remove', 'click', () => {
+    localStorage.removeItem('fg_brand_logo_horiz');
+    render();
+  });
+
+  on('brand-reset-all', 'click', () => {
+    if (!confirm('Reset all branding to FastGlass defaults? This removes your logos, brand name, and color.')) return;
+    ['fg_brand_name', 'fg_brand_color', 'fg_brand_logo_square', 'fg_brand_logo_horiz'].forEach(k => localStorage.removeItem(k));
+    applyBranding();
     render();
   });
 
@@ -2994,10 +3205,11 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
-// Apply saved theme before first render to avoid flash
+// Apply saved theme and branding before first render to avoid flash
 (function() {
   const saved = localStorage.getItem('fg_theme') || 'dark';
   document.documentElement.dataset.theme = saved;
+  applyBranding();
 })();
 
 function toggleTheme() {
