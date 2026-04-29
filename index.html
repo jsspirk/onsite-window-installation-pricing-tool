@@ -2007,7 +2007,7 @@ function renderNewQuoteStep1() {
     <!-- PANE TABS -->
     ${d.panes.length>0?`
     <div class="pane-tab-strip">
-      <button class="pane-tab ${!isEditing?'active':''}" id="pane-tab-new">+ New</button>
+      ${!d.isAdminEdit ? `<button class="pane-tab ${!isEditing?'active':''}" id="pane-tab-new">+ New</button>` : ''}
       ${d.panes.map((p,i)=>`
         <button class="pane-tab ${isEditing&&d.editingPaneIdx===i?'active':''}" data-edit-pane-idx="${i}">
           ${i+1}${p.location?' · '+p.location.slice(0,8):''}
@@ -3625,8 +3625,7 @@ async function deleteAdminQuote(quoteId) {
     await sb.from('panes').delete().eq('quote_id', quoteId);
     await sb.from('quotes').delete().eq('id', quoteId);
   }
-  app.activeTab = 3;
-  navigate('admin');
+  navigate('home');
 }
 
 /* ================================================================
