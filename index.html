@@ -1306,6 +1306,7 @@ const app = {
   editMode: null,    // for admin panel edits
   activeTab: 0,
   historySearch: '',
+  homeSearch: '',
   sendModal: false,
   customerViewOpen: false,
   customerViewQuoteId: null,
@@ -1755,8 +1756,9 @@ function render() {
     case 'new-quote': el.innerHTML = renderNewQuote(); break;
     case 'review':    el.innerHTML = renderReview(); break;
     case 'sent':      el.innerHTML = renderSent(); break;
-    case 'history':   el.innerHTML = renderHistory(); break;
-    case 'admin':     el.innerHTML = renderAdmin(); break;
+    case 'history':      el.innerHTML = renderHistory(); break;
+    case 'admin':        el.innerHTML = renderAdmin(); break;
+    case 'quote-detail': el.innerHTML = renderQuoteDetail(); break;
     default:          el.innerHTML = renderLogin();
   }
 
@@ -1833,10 +1835,15 @@ function renderHome() {
   const u = app.currentUser;
   const brand = getBrand();
   const isAdmin = u.role === 'admin';
+  const homeSearch = (app.homeSearch || '').toLowerCase();
   const myQuotes = appData.quotes
     .filter(q => isAdmin || q.techId === u.id)
+    .filter(q => !homeSearch ||
+      (q.customerName || '').toLowerCase().includes(homeSearch) ||
+      (q.techName || '').toLowerCase().includes(homeSearch) ||
+      (q.jobNum || '').toLowerCase().includes(homeSearch))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .slice(0, isAdmin ? 10 : 3);
+    .slice(0, isAdmin ? 50 : 3);
 
   const catalogWarn = getCatalogWarning();
 
@@ -1864,16 +1871,24 @@ function renderHome() {
   </div>
 
   <div class="scroll-content scroll-content-pb">
-    <div class="flex-between mb-12 mt-4">
+    ${isAdmin ? `
+    <div style="padding:4px 0 12px;">
+      <div class="search-input-wrap">
+        <span class="search-icon">🔍</span>
+        <input class="search-input" id="home-search" placeholder="Search by customer, tech, or est #…" value="${app.homeSearch || ''}" />
+      </div>
+    </div>` : ''}
+
+    <div class="flex-between mb-12 ${isAdmin ? '' : 'mt-4'}">
       <span class="section-label">${isAdmin ? 'All Quotes' : 'Recent Quotes'}</span>
-      ${myQuotes.length > 0 ? `<button class="btn btn-ghost btn-sm" id="view-all-history">View All</button>` : ''}
+      ${!isAdmin && myQuotes.length > 0 ? `<button class="btn btn-ghost btn-sm" id="view-all-history">View All</button>` : ''}
     </div>
 
     ${myQuotes.length === 0 ? `
       <div class="empty-state" style="padding: 32px 24px;">
         <div class="empty-icon">📋</div>
-        <div class="empty-title">No quotes yet</div>
-        <div class="empty-sub">Tap "New Quote" to generate your first estimate.</div>
+        <div class="empty-title">${homeSearch ? 'No matches' : 'No quotes yet'}</div>
+        <div class="empty-sub">${homeSearch ? 'Try a different search term.' : 'Tap "New Quote" to generate your first estimate.'}</div>
       </div>
     ` : myQuotes.map(q => renderHistoryItem(q, isAdmin)).join('')}
 
@@ -1962,17 +1977,17 @@ function renderNewQuoteStep1() {
   return `
 <div class="screen" style="background:var(--bg-0);">
   <div class="app-header">
-    <button class="header-back-btn" id="back-home">←</button>
-    <div class="header-title">New Quote</div>
+    <button class="header-back-btn" id="${d.isAdminEdit ? 'back-to-quote-detail' : 'back-home'}">←</button>
+    <div class="header-title">${d.isAdminEdit ? 'Edit Pane' : 'New Quote'}</div>
     <div class="header-right">${connBadge()}</div>
   </div>
-  ${stepIndicator(0)}
+  ${d.isAdminEdit ? '' : stepIndicator(0)}
 
   <div class="scroll-content" style="padding-bottom:160px;">
     ${catalogWarn ? `<div class="alert alert-warning"><span class="alert-icon">⚠</span>${catalogWarn}</div>` : ''}
 
     <!-- JOB INFO -->
-    <div class="card mb-12">
+    ${d.isAdminEdit ? '' : `<div class="card mb-12">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
         <span style="font-size:13px;color:var(--text-2);">${today}</span>
         <span style="font-size:13px;color:var(--text-2);">${app.currentUser?.name||''}</span>
@@ -1987,7 +2002,7 @@ function renderNewQuoteStep1() {
           <input class="form-input" id="job-num" placeholder="Optional" value="${d.jobNum||''}" />
         </div>
       </div>
-    </div>
+    </div>`}
 
     <!-- PANE TABS -->
     ${d.panes.length>0?`
@@ -2111,6 +2126,14 @@ function renderNewQuoteStep1() {
     </div>`:''}
   </div>
 
+  ${d.isAdminEdit ? `
+  <div class="action-bar">
+    <button class="btn btn-primary btn-full" id="add-pane-btn" ${!canSave ? 'disabled' : ''}>
+      ✓ Update Pane
+    </button>
+    ${!canSave ? `<p style="text-align:center;font-size:13px;color:var(--text-3);margin-top:8px;">Select thickness, coating, finish and enter dimensions</p>` : ''}
+  </div>
+  ` : `
   <div class="action-bar" style="flex-direction:column;gap:8px;">
     <div style="display:flex;gap:8px;">
       <button class="btn btn-secondary" id="add-pane-btn" ${!canSave?'disabled':''} style="flex:1;">
@@ -2123,6 +2146,7 @@ function renderNewQuoteStep1() {
     ${needsQuote||largePaneWarn?`<button class="btn btn-danger btn-full btn-sm" id="flag-large-pane">⚑ Flag for Office Review</button>`:''}
     ${!canSave&&!canReview&&!needsQuote&&!largePaneWarn?`<p style="text-align:center;font-size:13px;color:var(--text-3);">Select thickness, coating, finish and enter dimensions</p>`:''}
   </div>
+  `}
 </div>`;
 }
 
@@ -2680,6 +2704,127 @@ function renderAdminQuoteLog() {
 }
 
 /* ================================================================
+   SCREEN: QUOTE DETAIL (admin)
+================================================================ */
+function renderQuoteDetail() {
+  const d = app.draft;
+  if (!d) return '';
+  const jobCalc = calcJob(d.panes, d.supplier);
+  const statusMap = { sent: 'badge-sent', draft: 'badge-draft', flagged: 'badge-flagged', shown: 'badge-shown' };
+
+  return `
+<div class="screen" style="background:var(--bg-0);">
+  <div class="app-header">
+    <button class="header-back-btn" id="back-home-from-detail">←</button>
+    <div class="header-title">Quote Detail</div>
+    <div class="header-right">${connBadge()}</div>
+  </div>
+
+  <div class="scroll-content" style="padding-bottom:180px;">
+    <!-- Customer Info -->
+    <div class="card mb-12">
+      <div class="flex-between mb-4">
+        <div>
+          <div style="font-family:var(--font-semi);font-weight:700;font-size:18px;color:var(--text-0);">
+            ${d.customerName || '<span style="color:var(--text-3);font-style:italic;">No customer name</span>'}
+          </div>
+          ${d.customerContact ? `<div style="font-size:14px;color:var(--text-1);margin-top:2px;">${d.contactType === 'email' ? '✉' : '📱'} ${d.customerContact}</div>` : ''}
+        </div>
+        <span class="badge ${statusMap[d.status] || 'badge-draft'}">${d.status}</span>
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px;">
+        <div style="font-size:13px;color:var(--text-2);">${fmtDate(d.jobDate)}</div>
+        ${d.jobNum ? `<div style="font-size:13px;color:var(--text-2);">Est# <strong style="color:var(--text-1);">${d.jobNum}</strong></div>` : ''}
+        ${d.techName ? `<div style="font-size:13px;color:var(--text-2);">Tech: <strong style="color:var(--text-1);">${d.techName}</strong></div>` : ''}
+      </div>
+    </div>
+
+    <!-- Panes -->
+    <div class="section-label mb-8">${d.panes.length} Pane${d.panes.length !== 1 ? 's' : ''}</div>
+    ${d.panes.map((p, i) => {
+      const r = calcPane(p, d.supplier);
+      const label = getPaneLabel(p);
+      const qty = p.qty || 1;
+      return `
+      <div class="card card-tight mb-8">
+        <div class="flex-between mb-6">
+          <div>
+            <span style="font-family:var(--font-semi);font-weight:700;font-size:15px;">Pane ${i + 1}${p.location ? ' · ' + p.location : ''}</span>
+            <div style="font-size:12px;color:var(--text-2);margin-top:2px;">${label}${qty > 1 ? ' · Qty ' + qty : ''}</div>
+          </div>
+          <button class="btn btn-secondary btn-sm" data-admin-edit-pane="${i}" style="font-size:12px;padding:6px 14px;">Edit Pane</button>
+        </div>
+        <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">
+          ${fmtMeasured(p.widthWhole || p.width, p.widthFrac || '')}" × ${fmtMeasured(p.heightWhole || p.height, p.heightFrac || '')}"
+          ${r && !r.requiresQuote ? ' · ' + r.sqft.toFixed(2) + ' sqft' : ''}
+        </div>
+        <div class="divider-dashed"></div>
+        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Glass / Product</span><span class="price-row-value" style="font-size:14px;">${r && !r.requiresQuote ? fmt(r.productCost) : 'QUOTE'}</span></div>
+        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Labor (${(p.laborHrs ?? 1.0).toFixed(2)} hr)</span><span class="price-row-value" style="font-size:14px;">${r && !r.requiresQuote ? fmt(r.laborCost) : '—'}</span></div>
+        <div class="price-row" style="margin-top:4px;">
+          <span class="price-row-label" style="font-size:13px;font-weight:600;color:var(--text-1);">Pane Estimate</span>
+          <span class="price-row-value" style="font-size:15px;color:var(--amber);font-weight:700;">${r && !r.requiresQuote ? fmtRange(r.lineTotal) : '—'}</span>
+        </div>
+      </div>`;
+    }).join('')}
+
+    <!-- Totals -->
+    <div class="card mt-8" style="border-color:var(--amber);background:var(--amber-bg);">
+      <div class="section-label mb-12">Job Total</div>
+      <div class="price-row"><span class="price-row-label">Total Glass / Product</span><span class="price-row-value">${fmt(jobCalc.totalProduct)}</span></div>
+      <div class="price-row"><span class="price-row-label">Total Labor</span><span class="price-row-value">${fmt(jobCalc.totalLabor)}</span></div>
+      <div class="price-total-row">
+        <span class="price-total-label">Estimate Range</span>
+        <span class="price-total-value" style="font-size:18px;">${fmtRange(jobCalc.grandTotal)}</span>
+      </div>
+    </div>
+
+    ${d.notes ? `<div class="card mt-12"><div class="section-label mb-8">Notes</div><p style="font-size:14px;color:var(--text-1);">${d.notes}</p></div>` : ''}
+  </div>
+
+  <!-- Action Bar -->
+  <div class="action-bar" style="flex-direction:column;gap:10px;">
+    <div style="font-size:12px;color:var(--text-2);font-family:var(--font-semi);font-weight:600;letter-spacing:0.05em;">QUOTE STATUS</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      ${['draft','sent','shown','flagged'].map(s => `
+        <button class="chip ${d.status === s ? 'active' : ''}" data-admin-status="${s}" style="min-height:36px;font-size:13px;padding:0 14px;">${s}</button>
+      `).join('')}
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-ghost btn-sm" id="admin-delete-btn" style="flex:1;color:var(--red);border-color:var(--red);">🗑 Delete</button>
+      <button class="btn btn-primary" id="admin-edit-save" style="flex:2;">✓ Save Quote</button>
+    </div>
+  </div>
+</div>`;
+}
+
+function openAdminQuote(quoteId) {
+  const q = appData.quotes.find(x => x.id === quoteId);
+  if (!q) return;
+  app.draft = {
+    id:              q.id,
+    customerName:    q.customerName || '',
+    customerContact: q.customerContact || '',
+    contactType:     q.contactType || 'phone',
+    jobDate:         q.jobDate,
+    jobNum:          q.jobNum || '',
+    notes:           q.notes || '',
+    toolsRequired:   q.toolsRequired || '',
+    supplier:        q.supplier || getDefaultSupplier(),
+    panes:           JSON.parse(JSON.stringify(q.panes)),
+    currentPane:     freshPane(),
+    editingPaneIdx:  null,
+    step:            3,
+    catalogVersion:  q.catalogVersion,
+    status:          q.status,
+    techId:          q.techId,
+    techName:        q.techName,
+    isAdminEdit:     true,
+  };
+  navigate('quote-detail');
+}
+
+/* ================================================================
    ADMIN TAB: BRANDING
 ================================================================ */
 function renderAdminBranding() {
@@ -2869,10 +3014,14 @@ function attachEvents() {
   on('home-admin-btn2', 'click', () => navigate('admin'));
   on('view-all-history', 'click', () => navigate('history'));
 
-  // History items on home
+  // History items on home — admin goes to quote-detail, tech goes to review
   delegate('[data-quote-id]', 'click', e => {
     const id = e.currentTarget.dataset.quoteId;
-    viewQuoteFromHistory(id);
+    if (app.currentUser?.role === 'admin') {
+      openAdminQuote(id);
+    } else {
+      viewQuoteFromHistory(id);
+    }
   });
 
   // ---- NEW QUOTE STEP 1 ----
@@ -3114,10 +3263,24 @@ function attachEvents() {
     const isEditing = d.editingPaneIdx !== null && d.editingPaneIdx !== undefined;
 
     if (isEditing) {
-      // Update existing pane in place
       d.panes[d.editingPaneIdx] = { id: d.panes[d.editingPaneIdx].id, ...cp };
       d.editingPaneIdx = null;
-      d.currentPane = freshPane(cp);
+      d.currentPane = freshPane();
+
+      if (d.isAdminEdit) {
+        // Recalculate totals and sync, then return to quote detail
+        const jobCalc = calcJob(d.panes, d.supplier);
+        d.totalProduct   = jobCalc.totalProduct;
+        d.totalLabor     = jobCalc.totalLabor;
+        d.totalMaterials = jobCalc.totalMaterials;
+        d.grandTotal     = jobCalc.grandTotal;
+        appData.quotes = appData.quotes.map(q => q.id === d.id ? { ...d } : q);
+        saveState(appData);
+        syncQuoteToSupabase(d, d.panes);
+        navigate('quote-detail');
+        return;
+      }
+
       render();
       return;
     }
@@ -3190,6 +3353,27 @@ function attachEvents() {
     app.activeTab = 3;
     navigate('admin');
   });
+  on('back-home-from-detail', 'click', () => {
+    app.draft = null;
+    navigate('home');
+  });
+  on('back-to-quote-detail', 'click', () => {
+    app.draft.editingPaneIdx = null;
+    app.draft.currentPane = freshPane();
+    navigate('quote-detail');
+  });
+  on('home-search', 'input', e => {
+    app.homeSearch = e.target.value;
+    render();
+  });
+  delegate('[data-admin-edit-pane]', 'click', e => {
+    const idx = parseInt(e.currentTarget.dataset.adminEditPane);
+    const d = app.draft;
+    d.editingPaneIdx = idx;
+    d.currentPane = JSON.parse(JSON.stringify(d.panes[idx]));
+    d.step = 1;
+    navigate('new-quote');
+  });
 
   on('review-tools', 'input', e => { if (app.draft) app.draft.toolsRequired = e.target.value; });
   on('review-notes', 'input', e => { if (app.draft) app.draft.notes = e.target.value; });
@@ -3249,7 +3433,7 @@ function attachEvents() {
     }
   });
   delegate('[data-admin-edit-quote]', 'click', e => {
-    viewQuoteFromHistory(e.currentTarget.dataset.adminEditQuote, true);
+    openAdminQuote(e.currentTarget.dataset.adminEditQuote);
   });
   delegate('[data-admin-delete-quote]', 'click', e => {
     deleteAdminQuote(e.currentTarget.dataset.adminDeleteQuote);
@@ -3429,8 +3613,7 @@ async function saveAdminEdit() {
   saveState(appData);
   app.draft = null;
   syncQuoteToSupabase(updated, updated.panes); // fire-and-forget
-  app.activeTab = 3; // return to Quote Log tab
-  navigate('admin');
+  navigate('home');
 }
 
 async function deleteAdminQuote(quoteId) {
