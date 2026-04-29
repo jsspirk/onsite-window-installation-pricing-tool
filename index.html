@@ -1283,11 +1283,11 @@ function saveState(state) {
 
 function initState() {
   const saved = loadState();
-  if (saved) return saved;
+  if (saved) return { ...saved, quotes: [] }; // quotes now come from Supabase
   return {
     catalog: DEFAULT_CATALOG,
     users: DEFAULT_USERS,
-    quotes: SAMPLE_QUOTES,
+    quotes: [],
     lastSync: new Date().toISOString(),
   };
 }
@@ -1414,6 +1414,122 @@ async function saveConfig(updates) {
     updated_at: new Date().toISOString(),
     updated_by: app.currentUser?.id,
   }).eq('id', 1);
+}
+
+/* ================================================================
+   QUOTES — load from Supabase, sync writes in background
+================================================================ */
+function normalizeQuote(row) {
+  const panes = (row.panes || [])
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map(p => ({
+      id:          p.id,
+      thickness:   p.thickness,
+      coating:     p.coating,
+      finish:      p.finish,
+      grid:        p.grid,
+      shape:       p.shape,
+      location:    p.location,
+      qty:         p.qty,
+      widthWhole:  p.width_whole,
+      widthFrac:   p.width_frac,
+      heightWhole: p.height_whole,
+      heightFrac:  p.height_frac,
+      width:       parseFloat(p.width),
+      height:      parseFloat(p.height),
+      unit:        p.unit,
+      laborHrs:    parseFloat(p.labor_hrs),
+    }));
+  return {
+    id:              row.id,
+    techId:          row.tech_id,
+    techName:        row.tech_name,
+    customerName:    row.customer_name,
+    customerContact: row.customer_contact,
+    contactType:     row.contact_type,
+    jobDate:         row.job_date,
+    jobNum:          row.job_num,
+    notes:           row.notes,
+    toolsRequired:   row.tools_required,
+    status:          row.status,
+    supplier:        row.supplier,
+    totalProduct:    parseFloat(row.total_product),
+    totalLabor:      parseFloat(row.total_labor),
+    totalMaterials:  parseFloat(row.total_materials),
+    grandTotal:      parseFloat(row.grand_total),
+    catalogVersion:  row.catalog_version,
+    createdAt:       row.created_at,
+    syncedAt:        row.synced_at,
+    panes,
+  };
+}
+
+async function loadQuotes() {
+  try {
+    const { data, error } = await sb
+      .from('quotes')
+      .select('*, panes(*)')
+      .order('created_at', { ascending: false });
+    if (data && !error) {
+      appData.quotes = data.map(normalizeQuote);
+      try { localStorage.setItem('fg_quotes_cache', JSON.stringify(appData.quotes)); } catch {}
+      return;
+    }
+  } catch (e) { console.warn('Quotes fetch failed', e); }
+  // Offline: restore from cache
+  try {
+    const cached = localStorage.getItem('fg_quotes_cache');
+    if (cached) appData.quotes = JSON.parse(cached);
+  } catch {}
+}
+
+async function syncQuoteToSupabase(quote, panes) {
+  if (!app.isOnline) { saveState(appData); return; }
+  const quoteRow = {
+    id:               quote.id,
+    tech_id:          quote.techId,
+    tech_name:        quote.techName,
+    customer_name:    quote.customerName,
+    customer_contact: quote.customerContact,
+    contact_type:     quote.contactType,
+    job_date:         quote.jobDate,
+    job_num:          quote.jobNum,
+    notes:            quote.notes,
+    tools_required:   quote.toolsRequired,
+    status:           quote.status,
+    supplier:         quote.supplier,
+    total_product:    quote.totalProduct,
+    total_labor:      quote.totalLabor,
+    total_materials:  quote.totalMaterials,
+    grand_total:      quote.grandTotal,
+    catalog_version:  String(quote.catalogVersion),
+    synced_at:        new Date().toISOString(),
+  };
+  const paneRows = panes.map((p, i) => ({
+    id:           p.id,
+    quote_id:     quote.id,
+    sort_order:   i,
+    thickness:    p.thickness,
+    coating:      p.coating,
+    finish:       p.finish,
+    grid:         p.grid        || 'none',
+    shape:        p.shape       || 'standard',
+    location:     p.location    || '',
+    qty:          p.qty         || 1,
+    width_whole:  p.widthWhole  || String(p.width),
+    width_frac:   p.widthFrac   || '',
+    height_whole: p.heightWhole || String(p.height),
+    height_frac:  p.heightFrac  || '',
+    width:        p.width,
+    height:       p.height,
+    unit:         p.unit        || 'in',
+    labor_hrs:    p.laborHrs    ?? 1.0,
+  }));
+  const { error } = await sb.from('quotes').upsert(quoteRow);
+  if (!error) {
+    await sb.from('panes').delete().eq('quote_id', quote.id);
+    if (paneRows.length > 0) await sb.from('panes').insert(paneRows);
+  }
 }
 
 /* ================================================================
@@ -3173,6 +3289,7 @@ async function handleLogin() {
 
   await loadConfig();
   applyBranding();
+  await loadQuotes();
   navigate('home');
 }
 
@@ -3183,33 +3300,36 @@ function finalizeDraft(status) {
   const d = app.draft;
   const jobCalc = calcJob(d.panes, d.supplier);
   const quote = {
-    id: d.id,
-    techId: app.currentUser.id,
-    techName: app.currentUser.name,
-    customerName: d.customerName,
+    id:              d.id,
+    techId:          app.currentUser.id,
+    techName:        app.currentUser.name,
+    customerName:    d.customerName,
     customerContact: d.customerContact,
-    contactType: d.contactType,
-    jobDate: d.jobDate,
-    jobNum: d.jobNum || '',
-    notes: d.notes || '',
-    toolsRequired: d.toolsRequired || '',
-    status: status,
-    supplier: d.supplier,
-    panes: d.panes,
-    totalProduct: jobCalc.totalProduct,
-    totalLabor: jobCalc.totalLabor,
-    totalMaterials: jobCalc.totalMaterials,
-    grandTotal: jobCalc.grandTotal,
-    catalogVersion: d.catalogVersion,
-    createdAt: new Date().toISOString(),
-    syncedAt: app.isOnline ? new Date().toISOString() : null,
+    contactType:     d.contactType,
+    jobDate:         d.jobDate,
+    jobNum:          d.jobNum || '',
+    notes:           d.notes || '',
+    toolsRequired:   d.toolsRequired || '',
+    status:          status,
+    supplier:        d.supplier,
+    panes:           d.panes,
+    totalProduct:    jobCalc.totalProduct,
+    totalLabor:      jobCalc.totalLabor,
+    totalMaterials:  jobCalc.totalMaterials,
+    grandTotal:      jobCalc.grandTotal,
+    catalogVersion:  d.catalogVersion,
+    createdAt:       new Date().toISOString(),
+    syncedAt:        app.isOnline ? new Date().toISOString() : null,
   };
 
-  // Remove any existing quote with same id (resend scenario)
+  // Optimistic update — available immediately for renderSent()
   appData.quotes = appData.quotes.filter(q => q.id !== quote.id);
   appData.quotes.unshift(quote);
-  saveState(appData);
   app.draft = null;
+
+  // Background sync to Supabase — does not block navigation
+  syncQuoteToSupabase(quote, quote.panes);
+
   return quote;
 }
 
@@ -3246,8 +3366,8 @@ function viewQuoteFromHistory(quoteId) {
 window.addEventListener('online', () => {
   app.isOnline = true;
   appData.lastSync = new Date().toISOString();
-  saveState(appData);
-  render();
+  if (app.currentUser) loadQuotes().then(render);
+  else render();
 });
 window.addEventListener('offline', () => {
   app.isOnline = false;
@@ -3277,6 +3397,7 @@ async function init() {
   }
   await loadConfig();
   applyBranding();
+  if (app.currentUser) await loadQuotes();
   render();
 }
 
