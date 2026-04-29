@@ -68,6 +68,24 @@ const PRICE_CATALOG = {
   },
 };
 
+const DEFAULT_MARKUP_TIERS = [
+  { id: 1, name: 'Standard',  maxCost: 150,  multiplier: 3.00 },
+  { id: 2, name: 'Large',     maxCost: 300,  multiplier: 2.75 },
+  { id: 3, name: 'Oversized', maxCost: null, multiplier: 2.50 },
+];
+
+// Minimal appConfig mock — tests use default tiers (markup_tiers: null → fallback to DEFAULT_MARKUP_TIERS)
+let appConfig = { markup_tiers: null };
+
+function getMarkupTier(glassCost, tiers) {
+  const sorted = [...tiers].sort((a, b) => {
+    if (a.maxCost === null) return 1;
+    if (b.maxCost === null) return -1;
+    return a.maxCost - b.maxCost;
+  });
+  return sorted.find(t => t.maxCost === null || glassCost <= t.maxCost) || sorted[sorted.length - 1];
+}
+
 function getDefaultSupplier() {
   return localStorage.getItem('fg_default_supplier') || 'busick';
 }
@@ -104,13 +122,14 @@ function calcPane(pane, supplier) {
   const customGridFlat = gridMode === 'custom' ? 50 : 0;
   const shapeMult      = PRICE_CATALOG.shapeMultipliers[pane.shape] || 1.0;
   const glassCost      = SF * (rawRate + gridAdder) * shapeMult;
+  const tier           = getMarkupTier(glassCost, appConfig.markup_tiers || DEFAULT_MARKUP_TIERS);
   const laborHrs       = pane.laborHrs ?? 1.0;
   const laborCost      = laborHrs * PRICE_CATALOG.laborRate;
-  const productCost    = +(glassCost * 3 * qty + customGridFlat * qty).toFixed(2);
+  const productCost    = +(glassCost * tier.multiplier * qty + customGridFlat * qty).toFixed(2);
   const laborTotal     = +(laborCost * qty).toFixed(2);
   const lineTotal      = +(productCost + laborTotal).toFixed(2);
 
-  return { sqft: +(SF * qty).toFixed(4), productCost, laborCost: laborTotal, materialsCost: 0, lineTotal, requiresQuote: false, gridMode };
+  return { sqft: +(SF * qty).toFixed(4), productCost, laborCost: laborTotal, materialsCost: 0, lineTotal, requiresQuote: false, gridMode, tierName: tier.name };
 }
 
 function calcJob(panes, supplier) {
@@ -633,6 +652,119 @@ test('FRAC_OPTS values are in ascending order', () => {
   for (let i = 1; i < vals.length; i++) {
     assert.ok(vals[i] > vals[i-1], `FRAC_OPTS not ascending at index ${i}`);
   }
+});
+
+// ─── L. Tiered markup system ─────────────────────────────────────────────────
+
+section('L. Tiered markup system — getMarkupTier + calcPane');
+
+test('getMarkupTier returns Tier 1 (Standard) for glassCost = $0', () => {
+  const t = getMarkupTier(0, DEFAULT_MARKUP_TIERS);
+  assert.strictEqual(t.name, 'Standard');
+  assert.strictEqual(t.multiplier, 3.00);
+});
+
+test('getMarkupTier returns Tier 1 (Standard) for glassCost = $150 (boundary)', () => {
+  const t = getMarkupTier(150, DEFAULT_MARKUP_TIERS);
+  assert.strictEqual(t.name, 'Standard');
+});
+
+test('getMarkupTier returns Tier 2 (Large) for glassCost = $150.01', () => {
+  const t = getMarkupTier(150.01, DEFAULT_MARKUP_TIERS);
+  assert.strictEqual(t.name, 'Large');
+  assert.strictEqual(t.multiplier, 2.75);
+});
+
+test('getMarkupTier returns Tier 2 (Large) for glassCost = $300 (boundary)', () => {
+  const t = getMarkupTier(300, DEFAULT_MARKUP_TIERS);
+  assert.strictEqual(t.name, 'Large');
+});
+
+test('getMarkupTier returns Tier 3 (Oversized) for glassCost = $300.01', () => {
+  const t = getMarkupTier(300.01, DEFAULT_MARKUP_TIERS);
+  assert.strictEqual(t.name, 'Oversized');
+  assert.strictEqual(t.multiplier, 2.50);
+});
+
+test('getMarkupTier returns Tier 3 (Oversized) for very large glassCost', () => {
+  const t = getMarkupTier(99999, DEFAULT_MARKUP_TIERS);
+  assert.strictEqual(t.name, 'Oversized');
+});
+
+test('getMarkupTier works with custom tier configuration', () => {
+  const custom = [
+    { id: 1, name: 'Budget', maxCost: 100, multiplier: 3.50 },
+    { id: 2, name: 'Premium', maxCost: null, multiplier: 2.00 },
+  ];
+  assert.strictEqual(getMarkupTier(50, custom).name, 'Budget');
+  assert.strictEqual(getMarkupTier(100, custom).name, 'Budget');
+  assert.strictEqual(getMarkupTier(101, custom).name, 'Premium');
+});
+
+test('calcPane returns tierName in result', () => {
+  const r = calcPane(pane({ width: 24, height: 36 }), 'busick');
+  assert.ok('tierName' in r, 'result should include tierName');
+  assert.strictEqual(typeof r.tierName, 'string');
+});
+
+test('small pane uses Tier 1 multiplier (3.0×) — glassCost well below $150', () => {
+  // 12×12, clear, 1/8", annealed, no grid → SF=1, glassCost = 7.72 → Tier 1
+  const r = calcPane(pane({ width: 12, height: 12, grid: 'none' }), 'busick');
+  const SF = (12 * 12) / 144;
+  const glassCost = SF * 7.72;
+  const expected = +(glassCost * 3.00).toFixed(2);
+  assert.ok(Math.abs(r.productCost - expected) < 0.01,
+    `Expected ${expected}, got ${r.productCost}`);
+  assert.strictEqual(r.tierName, 'Standard');
+});
+
+test('large pane uses Tier 2 multiplier (2.75×) — glassCost between $150 and $300', () => {
+  // 34×76, clear, 1/8", annealed, no grid
+  // SF = (34*76)/144 = 17.944..., glassCost = 17.944 * 7.72 ≈ 138.5 → barely Tier 1
+  // Use c360_temp to get higher raw rate: 20.39 $/SF → glassCost = 17.944 * 20.39 ≈ 365.9 → Tier 3
+  // Let's find a combo that lands in Tier 2 ($150–$300):
+  // 24×72 clear_ann: SF = (24*72)/144 = 12, glassCost = 12 * 7.72 = 92.64 → Tier 1
+  // 34×76 c270_temp: SF=17.944, glassCost = 17.944 * 18.53 ≈ 332.4 → Tier 3
+  // 24×72 c270_ann: SF=12, glassCost = 12 * 12.01 = 144.12 → Tier 1
+  // 24×84 c270_ann: SF=14, glassCost = 14 * 12.01 = 168.14 → Tier 2 ✓
+  appConfig.markup_tiers = null; // ensure defaults used
+  const r = calcPane(pane({ width: 24, height: 84, coating: 'c270', finish: 'annealed', grid: 'none' }), 'busick');
+  const SF = (24 * 84) / 144;
+  const glassCost = SF * 12.01;
+  assert.ok(glassCost > 150 && glassCost <= 300, `glassCost ${glassCost.toFixed(2)} should be in Tier 2 range`);
+  const expected = +(glassCost * 2.75).toFixed(2);
+  assert.ok(Math.abs(r.productCost - expected) < 0.01,
+    `Expected ${expected} (Tier 2 × 2.75), got ${r.productCost}`);
+  assert.strictEqual(r.tierName, 'Large');
+});
+
+test('oversized pane uses Tier 3 multiplier (2.5×) — glassCost above $300', () => {
+  // 34×76 c270_temp: SF=17.944, rawRate=18.53, glassCost ≈ 332.4 → Tier 3
+  appConfig.markup_tiers = null;
+  const r = calcPane(pane({ width: 34, height: 76, coating: 'c270', finish: 'tempered', grid: 'none' }), 'busick');
+  const SF = (34 * 76) / 144;
+  const glassCost = SF * 18.53;
+  assert.ok(glassCost > 300, `glassCost ${glassCost.toFixed(2)} should be above $300`);
+  const expected = +(glassCost * 2.50).toFixed(2);
+  assert.ok(Math.abs(r.productCost - expected) < 0.01,
+    `Expected ${expected} (Tier 3 × 2.50), got ${r.productCost}`);
+  assert.strictEqual(r.tierName, 'Oversized');
+});
+
+test('admin-configured markup_tiers override DEFAULT_MARKUP_TIERS', () => {
+  const custom = [
+    { id: 1, name: 'Base', maxCost: 500, multiplier: 4.00 },
+    { id: 2, name: 'XL', maxCost: null, multiplier: 3.00 },
+  ];
+  appConfig.markup_tiers = custom;
+  const r = calcPane(pane({ width: 24, height: 36, grid: 'none' }), 'busick');
+  assert.strictEqual(r.tierName, 'Base');
+  const SF = (24 * 36) / 144;
+  const glassCost = SF * 7.72;
+  const expected = +(glassCost * 4.00).toFixed(2);
+  assert.ok(Math.abs(r.productCost - expected) < 0.01,
+    `Expected ${expected} with custom 4.0× tier, got ${r.productCost}`);
+  appConfig.markup_tiers = null; // reset
 });
 
 // ─── Summary ─────────────────────────────────────────────────────────────────

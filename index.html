@@ -1210,6 +1210,24 @@ const DEFAULT_CATALOG = {
   lastUpdated: new Date().toISOString(),
 };
 
+// Default three-tier markup hierarchy. Admin can override via app_config.markup_tiers.
+const DEFAULT_MARKUP_TIERS = [
+  { id: 1, name: 'Standard',  maxCost: 150,  multiplier: 3.00 },
+  { id: 2, name: 'Large',     maxCost: 300,  multiplier: 2.75 },
+  { id: 3, name: 'Oversized', maxCost: null, multiplier: 2.50 },
+];
+
+// Returns the applicable tier for a given raw glass cost (pre-multiplier $/panel).
+// Tiers sorted ascending; last tier (maxCost=null) catches anything above highest threshold.
+function getMarkupTier(glassCost, tiers) {
+  const sorted = [...tiers].sort((a, b) => {
+    if (a.maxCost === null) return 1;
+    if (b.maxCost === null) return -1;
+    return a.maxCost - b.maxCost;
+  });
+  return sorted.find(t => t.maxCost === null || glassCost <= t.maxCost) || sorted[sorted.length - 1];
+}
+
 const DEFAULT_USERS = [
   { id: 'tech_001', username: 'tech1', password: 'demo', name: 'Mike Torres', role: 'tech' },
   { id: 'tech_002', username: 'tech2', password: 'demo', name: 'Sarah Chen', role: 'tech' },
@@ -1312,6 +1330,7 @@ const app = {
   sendModal: false,
   customerViewOpen: false,
   customerViewQuoteId: null,
+  draftTiers: null,
 };
 
 // Shared config — loaded from Supabase app_config, localStorage cache as offline fallback
@@ -1322,6 +1341,7 @@ let appConfig = {
   brand_logo_horiz_url:  null,
   default_supplier:      'busick',
   range_band:            0.08,
+  markup_tiers:          null,
 };
 
 /* ================================================================
@@ -1353,9 +1373,10 @@ function calcPane(pane, supplier) {
   const customGridFlat = gridMode === 'custom' ? 50 : 0;
   const shapeMult     = PRICE_CATALOG.shapeMultipliers[pane.shape] || 1.0;
   const glassCost     = SF * (rawRate + gridAdder) * shapeMult;
+  const tier          = getMarkupTier(glassCost, appConfig.markup_tiers || DEFAULT_MARKUP_TIERS);
   const laborHrs      = pane.laborHrs ?? 1.0;  // default 1 hr for old panes
   const laborCost     = laborHrs * PRICE_CATALOG.laborRate;
-  const productCost   = +(glassCost * 3 * qty + customGridFlat * qty).toFixed(2);
+  const productCost   = +(glassCost * tier.multiplier * qty + customGridFlat * qty).toFixed(2);
   const laborTotal    = +(laborCost * qty).toFixed(2);
   const lineTotal     = +(productCost + laborTotal).toFixed(2);
 
@@ -1367,6 +1388,7 @@ function calcPane(pane, supplier) {
     lineTotal,
     requiresQuote: false,
     gridMode,
+    tierName:      tier.name,
   };
 }
 
@@ -2291,7 +2313,7 @@ function renderReview() {
         <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">${fmtMeasured(p.widthWhole||p.width, p.widthFrac||'')}" × ${fmtMeasured(p.heightWhole||p.height, p.heightFrac||'')}"\u2009${p.widthFrac||p.heightFrac?`<span style="color:var(--text-3);">(priced at ${p.width}" × ${p.height}")</span>`:''} ${r&&!r.requiresQuote?'· '+r.sqft.toFixed(2)+' sqft':''}</div>
         <div class="divider-dashed"></div>
         <div class="price-row">
-          <span class="price-row-label" style="font-size:13px;">Glass / Product${pGridMode!=='none'?' (incl. grid)':''}${p.shape&&p.shape!=='standard'?' · '+p.shape.replace(/_/g,' '):''}</span>
+          <span class="price-row-label" style="font-size:13px;">Glass / Product${pGridMode!=='none'?' (incl. grid)':''}${p.shape&&p.shape!=='standard'?' · '+p.shape.replace(/_/g,' '):''}${r&&!r.requiresQuote?' · '+r.tierName:''}</span>
           <span class="price-row-value" style="font-size:15px;">${r&&!r.requiresQuote?fmt(r.productCost):'QUOTE'}</span>
         </div>
         <div class="price-row"><span class="price-row-label" style="font-size:13px;">Labor (${(p.laborHrs??1.0).toFixed(2)} hr)</span><span class="price-row-value" style="font-size:15px;">${r&&!r.requiresQuote?fmt(r.laborCost):'—'}</span></div>
@@ -2525,7 +2547,7 @@ function renderHistoryItem(q, showTech = false) {
    SCREEN: ADMIN
 ================================================================ */
 function renderAdmin() {
-  const tabs = ['Glass Types', 'Labor & Mods', 'Materials', 'Quote Log', 'Branding'];
+  const tabs = ['Glass Types', 'Labor & Mods', 'Materials', 'Pricing Tiers', 'Quote Log', 'Branding'];
   const t = app.activeTab;
   return `
 <div class="screen" style="background:var(--bg-0);">
@@ -2545,8 +2567,9 @@ function renderAdmin() {
     ${t === 0 ? renderAdminGlassTypes() : ''}
     ${t === 1 ? renderAdminLabor() : ''}
     ${t === 2 ? renderAdminMaterials() : ''}
-    ${t === 3 ? renderAdminQuoteLog() : ''}
-    ${t === 4 ? renderAdminBranding() : ''}
+    ${t === 3 ? renderAdminPricingTiers() : ''}
+    ${t === 4 ? renderAdminQuoteLog() : ''}
+    ${t === 5 ? renderAdminBranding() : ''}
   </div>
 </div>`;
 }
@@ -2659,10 +2682,71 @@ function renderAdminMaterials() {
     <div style="font-size:13px;color:var(--text-2);line-height:2.0;font-family:monospace;">
       <div>SF = (width × height) / 144</div>
       <div>glassCost = SF × (rawRate + gridAdder) × shapeMult</div>
-      <div>paneTotal = glassCost × 3 + laborHrs × $${PRICE_CATALOG.laborRate}</div>
+      <div>paneTotal = glassCost × tier.multiplier + laborHrs × $${PRICE_CATALOG.laborRate}</div>
       <div>range = paneTotal × (1 ± band), floor $400</div>
     </div>
   </div>
+</div>`;
+}
+
+function renderAdminPricingTiers() {
+  if (!app.draftTiers) {
+    app.draftTiers = JSON.parse(JSON.stringify(appConfig.markup_tiers || DEFAULT_MARKUP_TIERS));
+  }
+  const tiers = [...app.draftTiers].sort((a, b) => {
+    if (a.maxCost === null) return 1;
+    if (b.maxCost === null) return -1;
+    return a.maxCost - b.maxCost;
+  });
+  return `
+<div>
+  <div class="section-label mb-8">Markup Tiers</div>
+  <div style="font-size:13px;color:var(--text-2);margin-bottom:16px;">
+    Glass sell price = raw cost × multiplier. Tier is selected by raw glass cost per panel.
+    Techs see tier names only — multiplier values are hidden from them.
+  </div>
+
+  ${tiers.map((tier, i) => {
+    const prevMax = i > 0 ? tiers[i-1].maxCost : 0;
+    const rangeLabel = tier.maxCost !== null
+      ? `$${prevMax} – $${tier.maxCost}`
+      : prevMax > 0 ? `> $${prevMax}` : 'All';
+    return `
+  <div class="card mb-10" data-tier-id="${tier.id}">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <div style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:.05em;">TIER ${i+1} &nbsp;·&nbsp; ${rangeLabel}</div>
+      ${tiers.length > 1 ? `<button class="btn btn-danger btn-sm" data-tier-remove="${tier.id}">Remove</button>` : ''}
+    </div>
+    <div class="form-group mb-10">
+      <label class="form-label">Name (shown to techs)</label>
+      <input class="form-input" data-tier-name="${tier.id}" value="${tier.name}" placeholder="e.g. Standard" />
+    </div>
+    <div style="display:flex;gap:10px;">
+      <div class="form-group" style="flex:1;">
+        <label class="form-label">Max glass cost ($)</label>
+        <input class="form-input" type="number" min="0" step="1" data-tier-maxcost="${tier.id}"
+          value="${tier.maxCost !== null ? tier.maxCost : ''}" placeholder="No limit" />
+      </div>
+      <div class="form-group" style="flex:1;">
+        <label class="form-label">Multiplier</label>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input class="form-input" type="number" min="0.1" step="0.05" data-tier-mult="${tier.id}"
+            value="${tier.multiplier}" />
+          <span style="font-size:15px;color:var(--text-2);flex-shrink:0;">×</span>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  }).join('')}
+
+  <div style="display:flex;gap:10px;margin-top:12px;">
+    <button class="btn btn-secondary" id="tier-add-btn" style="flex:1;">+ Add Tier</button>
+    <button class="btn btn-primary" id="tier-save-btn" style="flex:1;">Save Tiers</button>
+  </div>
+  ${appConfig.markup_tiers ? '' : `
+  <div style="font-size:12px;color:var(--text-3);margin-top:12px;text-align:center;">
+    Showing defaults — save to lock in your configuration.
+  </div>`}
 </div>`;
 }
 
@@ -3217,6 +3301,45 @@ function attachEvents() {
     render();
   });
 
+  // ---- PRICING TIERS ----
+  on('tier-add-btn', 'click', () => {
+    if (!app.draftTiers) app.draftTiers = JSON.parse(JSON.stringify(DEFAULT_MARKUP_TIERS));
+    app.draftTiers.push({ id: Date.now(), name: 'New Tier', maxCost: null, multiplier: 2.50 });
+    render();
+  });
+
+  delegate('[data-tier-remove]', 'click', e => {
+    const id = parseInt(e.currentTarget.dataset.tierRemove);
+    if (!app.draftTiers || app.draftTiers.length <= 1) return;
+    app.draftTiers = app.draftTiers.filter(t => t.id !== id);
+    render();
+  });
+
+  on('tier-save-btn', 'click', async () => {
+    const cards = document.querySelectorAll('[data-tier-id]');
+    const tiers = [];
+    for (const card of cards) {
+      const id = parseInt(card.dataset.tierId);
+      const name = card.querySelector(`[data-tier-name="${id}"]`)?.value.trim();
+      const maxCostRaw = card.querySelector(`[data-tier-maxcost="${id}"]`)?.value.trim();
+      const multRaw = card.querySelector(`[data-tier-mult="${id}"]`)?.value.trim();
+      if (!name) { alert('Each tier must have a name.'); return; }
+      const multiplier = parseFloat(multRaw);
+      if (isNaN(multiplier) || multiplier <= 0) { alert('Each tier must have a valid multiplier greater than 0.'); return; }
+      const maxCost = maxCostRaw === '' ? null : parseFloat(maxCostRaw);
+      tiers.push({ id, name, maxCost, multiplier: +multiplier.toFixed(4) });
+    }
+    tiers.sort((a, b) => {
+      if (a.maxCost === null) return 1;
+      if (b.maxCost === null) return -1;
+      return a.maxCost - b.maxCost;
+    });
+    tiers[tiers.length - 1].maxCost = null; // last tier always has no upper limit
+    app.draftTiers = tiers;
+    await saveConfig({ markup_tiers: tiers });
+    render();
+  });
+
   // Returns true if currentPane has unsaved changes vs the stored pane at editingPaneIdx
   const hasUnsavedPaneChanges = () => {
     const d = app.draft;
@@ -3353,7 +3476,7 @@ function attachEvents() {
   });
   on('back-to-admin-log', 'click', () => {
     app.draft = null;
-    app.activeTab = 3;
+    app.activeTab = 4;
     navigate('admin');
   });
   on('back-home-from-detail', 'click', () => {
@@ -3459,6 +3582,7 @@ function attachEvents() {
   // ---- ADMIN ----
   on('back-home-admin', 'click', () => navigate('home'));
   delegate('[data-tab]', 'click', e => {
+    if (app.activeTab === 3) app.draftTiers = null; // discard unsaved tier edits on tab leave
     app.activeTab = parseInt(e.currentTarget.dataset.tab);
     app.editMode = null;
     render();
