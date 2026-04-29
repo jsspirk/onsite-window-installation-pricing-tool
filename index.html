@@ -1140,6 +1140,7 @@
     .send-option-title { font-family: var(--font-semi); font-weight: 700; font-size: 16px; }
     .send-option-sub { font-size: 13px; color: var(--text-2); }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 <div id="app"></div>
@@ -1149,7 +1150,15 @@
    CONSTANTS & DEFAULT CATALOG DATA
    (placeholder rates — Operations team to confirm before production)
 ================================================================ */
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
+
+/* ================================================================
+   SUPABASE CLIENT
+================================================================ */
+const SUPABASE_URL = 'https://qulbihqeiuupydhzvsao.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_gKbWZzVl84xMZFMkWTbF6Q_GchqKQJk';
+const { createClient } = supabase;
+const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 const MAX_PANE_SIZE_IN = 120; // inches — trigger large-pane warning
 
 // FastGlass pricing engine — sourced from COST CALCULATOR 2.27.2026 (CURRENT).xlsx
@@ -1635,14 +1644,14 @@ function renderLogin() {
   <div class="login-form">
     <div class="login-demo-hint">
       <strong>Demo Credentials</strong><br>
-      Technician: <strong>tech1 / demo</strong><br>
-      Admin: <strong>admin / demo</strong>
+      Tech: <strong>tech1@demo.com / demo</strong><br>
+      Admin: <strong>admin@demo.com / demo</strong>
     </div>
 
     <div class="form-group">
-      <label class="form-label">Username</label>
-      <input class="form-input" id="login-user" type="text" autocomplete="username"
-        autocapitalize="none" placeholder="Enter username" value="" />
+      <label class="form-label">Email</label>
+      <input class="form-input" id="login-user" type="email" autocomplete="email"
+        autocapitalize="none" placeholder="Enter your email" value="" />
     </div>
     <div class="form-group">
       <label class="form-label">Password</label>
@@ -2670,7 +2679,8 @@ function attachEvents() {
     app.draft = newDraft();
     navigate('new-quote');
   });
-  on('home-logout-btn', 'click', () => {
+  on('home-logout-btn', 'click', async () => {
+    await sb.auth.signOut();
     app.currentUser = null;
     app.draft = null;
     navigate('login');
@@ -3086,18 +3096,41 @@ function attachCustomerViewEvents() {
 /* ================================================================
    AUTH
 ================================================================ */
-function handleLogin() {
-  const username = document.getElementById('login-user')?.value.trim();
+async function handleLogin() {
+  const email    = document.getElementById('login-user')?.value.trim();
   const password = document.getElementById('login-pass')?.value;
-  const errEl = document.getElementById('login-error');
+  const errEl    = document.getElementById('login-error');
+  const btn      = document.getElementById('login-btn');
 
-  const user = appData.users.find(u => u.username === username && u.password === password);
-  if (user) {
-    app.currentUser = user;
-    navigate('home');
-  } else {
-    if (errEl) errEl.textContent = 'Invalid username or password. Try tech1/demo or admin/demo.';
+  if (!email || !password) {
+    if (errEl) errEl.textContent = 'Please enter your email and password.';
+    return;
   }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
+  if (errEl) errEl.textContent = '';
+
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+
+  if (error) {
+    if (errEl) errEl.textContent = 'Invalid email or password.';
+    if (btn) { btn.disabled = false; btn.textContent = 'Sign In →'; }
+    return;
+  }
+
+  const { data: profile } = await sb
+    .from('profiles')
+    .select('name, role')
+    .eq('id', data.user.id)
+    .single();
+
+  app.currentUser = {
+    id:   data.user.id,
+    name: profile?.name || data.user.email,
+    role: profile?.role || 'tech',
+  };
+
+  navigate('home');
 }
 
 /* ================================================================
@@ -3181,27 +3214,33 @@ window.addEventListener('offline', () => {
 /* ================================================================
    INIT
 ================================================================ */
-function init() {
-  // Check for saved session
-  const savedSession = sessionStorage.getItem('fg_user');
-  if (savedSession) {
-    try {
-      app.currentUser = JSON.parse(savedSession);
-    } catch {}
+async function init() {
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) {
+      const { data: profile } = await sb
+        .from('profiles')
+        .select('name, role')
+        .eq('id', session.user.id)
+        .single();
+      app.currentUser = {
+        id:   session.user.id,
+        name: profile?.name || session.user.email,
+        role: profile?.role || 'tech',
+      };
+    }
+  } catch (e) {
+    console.warn('Session restore failed', e);
   }
-
   render();
-
-  // Save session on user change
-  const originalNavigate = navigate;
 }
 
-// Persist session across page refreshes
-window.addEventListener('beforeunload', () => {
-  if (app.currentUser) {
-    sessionStorage.setItem('fg_user', JSON.stringify(app.currentUser));
-  } else {
-    sessionStorage.removeItem('fg_user');
+// Sync auth state across tabs and handle token expiry
+sb.auth.onAuthStateChange((event) => {
+  if (event === 'SIGNED_OUT') {
+    app.currentUser = null;
+    app.draft = null;
+    navigate('login');
   }
 });
 
