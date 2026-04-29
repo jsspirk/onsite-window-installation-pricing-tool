@@ -103,7 +103,7 @@ function calcPane(pane, supplier) {
   const gridAdder      = gridMode !== 'none' ? sup.gridAdder : 0;
   const customGridFlat = gridMode === 'custom' ? 50 : 0;
   const shapeMult      = PRICE_CATALOG.shapeMultipliers[pane.shape] || 1.0;
-  const glassCost      = SF * (rawRate + gridAdder) * sup.markup * shapeMult;
+  const glassCost      = SF * (rawRate + gridAdder) * shapeMult;
   const laborHrs       = pane.laborHrs ?? 1.0;
   const laborCost      = laborHrs * PRICE_CATALOG.laborRate;
   const productCost    = +(glassCost * 3 * qty + customGridFlat * qty).toFixed(2);
@@ -311,7 +311,7 @@ test('grid="standard" → Busick gridAdder (+$5.00/SF) added to rate', () => {
   const noGrid = calcPane(pane({ grid: 'none',     width: 24, height: 36 }), 'busick');
   const std    = calcPane(pane({ grid: 'standard', width: 24, height: 36 }), 'busick');
   const SF = (24 * 36) / 144;
-  const expectedDiff = +(SF * PRICE_CATALOG.suppliers.busick.gridAdder * PRICE_CATALOG.suppliers.busick.markup * 3).toFixed(2);
+  const expectedDiff = +(SF * PRICE_CATALOG.suppliers.busick.gridAdder * 3).toFixed(2);
   assert.ok(
     Math.abs((std.productCost - noGrid.productCost) - expectedDiff) < 0.01,
     `Grid adder diff should be ~${expectedDiff}, got ${(std.productCost - noGrid.productCost).toFixed(2)}`
