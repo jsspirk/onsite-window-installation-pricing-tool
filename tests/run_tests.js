@@ -14,6 +14,8 @@
  *   I. freshPane shape — new fields present, old fields absent
  *   J. Backward compatibility — old panes with gridEnabled still price correctly
  *   K. Dimension entry — whole + fraction → ceiling inch conversion
+ *   L. Flat sell multiplier (3×) + supplier markup
+ *   M. Glass weight — crew sizing and labor cost
  */
 
 'use strict';
@@ -31,8 +33,9 @@ const localStorage = {
 // (keeps tests independent of a build tool — copy updated whenever source changes)
 
 const PRICE_CATALOG = {
-  version: '2026-03-01',
+  version: '2026-07-14',
   laborRate: 200,
+  sellMultiplier: 3,
   suppliers: {
     busick:    { name: 'Busick',    markup: 1.25,  gridAdder: 5.00  },
     glaz_tech: { name: 'Glaz-Tech', markup: 1.275, gridAdder: 3.75  },
@@ -40,19 +43,19 @@ const PRICE_CATALOG = {
   },
   rates: {
     busick: {
-      '1/8"':  { clear_ann: 7.72,  clear_temp: 11.97, c270_ann: 12.01, c270_temp: 18.53, c360_ann: 13.90, c360_temp: 20.39 },
-      '3/16"': { clear_ann: 8.66,  clear_temp: 13.00, c270_ann: 13.98, c270_temp: 19.24, c360_ann: 15.40, c360_temp: 22.40 },
-      '1/4"':  { clear_ann: 8.66,  clear_temp: 13.00, c270_ann: 13.98, c270_temp: 19.24, c360_ann: null,  c360_temp: null  },
+      '1/8"':  { clear_ann: 7.72, clear_temp: 11.97, c180_ann: 12.01, c180_temp: 18.53, c270_ann: 12.01, c270_temp: 18.53, c360_ann: 13.90, c360_temp: 20.39 },
+      '3/16"': { clear_ann: 8.66, clear_temp: 13.00, c180_ann: 13.98, c180_temp: 19.24, c270_ann: 13.98, c270_temp: 19.24, c360_ann: 15.40, c360_temp: 22.40 },
+      '1/4"':  { clear_ann: 8.66, clear_temp: 13.00, c180_ann: null,  c180_temp: null,  c270_ann: 13.98, c270_temp: 19.24, c360_ann: 13.39, c360_temp: 19.48 },
     },
     glaz_tech: {
-      '1/8"':  { clear_ann: 9.95,  clear_temp: 11.04, c270_ann: 12.21, c270_temp: 13.75, c360_ann: 13.89, c360_temp: 15.50 },
-      '3/16"': { clear_ann: 11.82, clear_temp: 14.22, c270_ann: 12.88, c270_temp: 16.58, c360_ann: 15.52, c360_temp: 17.67 },
-      '1/4"':  { clear_ann: 11.94, clear_temp: 14.35, c270_ann: 14.13, c270_temp: 17.76, c360_ann: 15.85, c360_temp: 18.41 },
+      '1/8"':  { clear_ann: 9.95,  clear_temp: 11.04, c180_ann: 12.21, c180_temp: 13.66, c270_ann: 12.21, c270_temp: 13.75, c360_ann: 13.89, c360_temp: 15.50 },
+      '3/16"': { clear_ann: 11.82, clear_temp: 14.22, c180_ann: 14.13, c180_temp: 16.73, c270_ann: 12.88, c270_temp: 16.58, c360_ann: 15.52, c360_temp: 17.67 },
+      '1/4"':  { clear_ann: 11.94, clear_temp: 14.35, c180_ann: 14.22, c180_temp: 16.52, c270_ann: 14.13, c270_temp: 17.76, c360_ann: 15.85, c360_temp: 18.41 },
     },
     oldcastle: {
-      '1/8"':  { clear_ann: 8.40,  clear_temp: 10.64, c270_ann: 11.82, c270_temp: 14.06, c360_ann: 13.27, c360_temp: 15.79 },
-      '3/16"': { clear_ann: 9.80,  clear_temp: 12.04, c270_ann: 14.78, c270_temp: 17.02, c360_ann: null,  c360_temp: 17.78 },
-      '1/4"':  { clear_ann: 8.04,  clear_temp:  9.50, c270_ann: 10.51, c270_temp: 12.54, c360_ann: 12.25, c360_temp: 14.25 },
+      '1/8"':  { clear_ann: 8.40, clear_temp: 10.64, c180_ann: 11.82, c180_temp: 14.03, c270_ann: 11.82, c270_temp: 14.06, c360_ann: 13.27, c360_temp: 15.79 },
+      '3/16"': { clear_ann: 9.80, clear_temp: 12.04, c180_ann: 12.82, c180_temp: 15.06, c270_ann: 14.78, c270_temp: 17.02, c360_ann: null,  c360_temp: 17.78 },
+      '1/4"':  { clear_ann: 8.04, clear_temp:  9.50, c180_ann: 13.94, c180_temp: 16.18, c270_ann: 10.51, c270_temp: 12.54, c360_ann: 12.25, c360_temp: 14.25 },
     },
   },
   shapeMultipliers: {
@@ -66,24 +69,29 @@ const PRICE_CATALOG = {
     octagon:       2.00,
     triple_pane:   1.75,
   },
+  glassWeights: {
+    '1/8"':  3.28,
+    '3/16"': 4.90,
+    '1/4"':  6.54,
+  },
+  weightThresholds: {
+    heavy:    75,
+    elevated: 50,
+  },
 };
 
-const DEFAULT_MARKUP_TIERS = [
-  { id: 1, name: 'Standard',  maxCost: 150,  multiplier: 3.00 },
-  { id: 2, name: 'Large',     maxCost: 300,  multiplier: 2.75 },
-  { id: 3, name: 'Oversized', maxCost: null, multiplier: 2.50 },
-];
+function calcPaneWeight(pane) {
+  if (!pane.width || !pane.height || !pane.thickness) return null;
+  const lbsPerSF = PRICE_CATALOG.glassWeights[pane.thickness];
+  if (!lbsPerSF) return null;
+  return +((pane.width * pane.height) / 144 * lbsPerSF).toFixed(1);
+}
 
-// Minimal appConfig mock — tests use default tiers (markup_tiers: null → fallback to DEFAULT_MARKUP_TIERS)
-let appConfig = { markup_tiers: null };
-
-function getMarkupTier(glassCost, tiers) {
-  const sorted = [...tiers].sort((a, b) => {
-    if (a.maxCost === null) return 1;
-    if (b.maxCost === null) return -1;
-    return a.maxCost - b.maxCost;
-  });
-  return sorted.find(t => t.maxCost === null || glassCost <= t.maxCost) || sorted[sorted.length - 1];
+function isHeavyLift(pane) {
+  const w = calcPaneWeight(pane);
+  if (w === null) return false;
+  const { heavy, elevated } = PRICE_CATALOG.weightThresholds;
+  return w >= heavy || (pane.storyLevel === 'upper' && w >= elevated);
 }
 
 function getDefaultSupplier() {
@@ -110,7 +118,7 @@ function calcPane(pane, supplier) {
   const qty       = pane.qty || 1;
   const SF        = (w_in * h_in) / 144;
   const finishKey = pane.finish === 'annealed' ? 'ann' : 'temp';
-  const coatingKey = (pane.coating === 'c180' || pane.coating === 'hardcoat') ? 'c270' : pane.coating;
+  const coatingKey = pane.coating === 'hardcoat' ? 'c180' : pane.coating;
   const rateKey   = `${coatingKey}_${finishKey}`;
   const sup       = PRICE_CATALOG.suppliers[supplier] || PRICE_CATALOG.suppliers.busick;
   const rawRate   = PRICE_CATALOG.rates[supplier]?.[pane.thickness]?.[rateKey];
@@ -118,18 +126,18 @@ function calcPane(pane, supplier) {
   if (rawRate === null || rawRate === undefined) return { requiresQuote: true };
 
   const gridMode       = pane.grid !== undefined ? pane.grid : (pane.gridEnabled ? 'standard' : 'none');
-  const gridAdder      = gridMode !== 'none' ? sup.gridAdder : 0;
+  const gridAdder      = gridMode !== 'none' ? sup.gridAdder * (pane.shape === 'triple_pane' ? 2 : 1) : 0;
   const customGridFlat = gridMode === 'custom' ? 50 : 0;
   const shapeMult      = PRICE_CATALOG.shapeMultipliers[pane.shape] || 1.0;
-  const glassCost      = SF * (rawRate + gridAdder) * shapeMult;
-  const tier           = getMarkupTier(glassCost, appConfig.markup_tiers || DEFAULT_MARKUP_TIERS);
+  const glassCost      = SF * (rawRate + gridAdder) * shapeMult * sup.markup;
   const laborHrs       = pane.laborHrs ?? 1.0;
-  const laborCost      = laborHrs * PRICE_CATALOG.laborRate;
-  const productCost    = +(glassCost * tier.multiplier * qty + customGridFlat * qty).toFixed(2);
+  const crewSize       = isHeavyLift(pane) ? 2 : 1;
+  const laborCost      = laborHrs * crewSize * PRICE_CATALOG.laborRate;
+  const productCost    = +(glassCost * PRICE_CATALOG.sellMultiplier * qty + customGridFlat * qty).toFixed(2);
   const laborTotal     = +(laborCost * qty).toFixed(2);
   const lineTotal      = +(productCost + laborTotal).toFixed(2);
 
-  return { sqft: +(SF * qty).toFixed(4), productCost, laborCost: laborTotal, materialsCost: 0, lineTotal, requiresQuote: false, gridMode, tierName: tier.name };
+  return { sqft: +(SF * qty).toFixed(4), productCost, laborCost: laborTotal, materialsCost: 0, lineTotal, requiresQuote: false, gridMode, weight: calcPaneWeight(pane), crewSize };
 }
 
 function calcJob(panes, supplier) {
@@ -190,6 +198,7 @@ function freshPane(from) {
     height:      0,
     unit:        'in',
     laborHrs:    1.0,
+    storyLevel:  'ground',
   };
 }
 
@@ -250,6 +259,7 @@ function pane(overrides = {}) {
     height:      36,
     unit:        'in',
     laborHrs:    1.0,
+    storyLevel:  'ground',
     ...overrides,
   };
 }
@@ -330,7 +340,8 @@ test('grid="standard" → Busick gridAdder (+$5.00/SF) added to rate', () => {
   const noGrid = calcPane(pane({ grid: 'none',     width: 24, height: 36 }), 'busick');
   const std    = calcPane(pane({ grid: 'standard', width: 24, height: 36 }), 'busick');
   const SF = (24 * 36) / 144;
-  const expectedDiff = +(SF * PRICE_CATALOG.suppliers.busick.gridAdder * 3).toFixed(2);
+  const sup = PRICE_CATALOG.suppliers.busick;
+  const expectedDiff = +(SF * sup.gridAdder * sup.markup * PRICE_CATALOG.sellMultiplier).toFixed(2);
   assert.ok(
     Math.abs((std.productCost - noGrid.productCost) - expectedDiff) < 0.01,
     `Grid adder diff should be ~${expectedDiff}, got ${(std.productCost - noGrid.productCost).toFixed(2)}`
@@ -398,23 +409,30 @@ test('calcPane accepts no difficulty argument (does not throw)', () => {
 
 // ─── E. Pricing engine — coating aliasing ────────────────────────────────────
 
-section('E. Coating rate aliasing (c180 and hardcoat → c270 rates)');
+section('E. Coating rate aliasing — hardcoat maps to c180');
 
-test('c180 and c270 produce identical product cost', () => {
-  const c270r = calcPane(pane({ coating: 'c270' }), 'busick');
-  const c180r = calcPane(pane({ coating: 'c180' }), 'busick');
-  assert.strictEqual(c270r.productCost, c180r.productCost);
+test('hardcoat and c180 produce identical product cost (both use c180 key)', () => {
+  const c180r    = calcPane(pane({ coating: 'c180',     thickness: '1/8"' }), 'busick');
+  const hardcoat = calcPane(pane({ coating: 'hardcoat', thickness: '1/8"' }), 'busick');
+  assert.strictEqual(c180r.productCost, hardcoat.productCost);
 });
 
-test('hardcoat and c270 produce identical product cost', () => {
-  const c270r    = calcPane(pane({ coating: 'c270'     }), 'busick');
-  const hardcoat = calcPane(pane({ coating: 'hardcoat' }), 'busick');
-  assert.strictEqual(c270r.productCost, hardcoat.productCost);
+test('hardcoat does NOT equal c270 at GTI 3/16" ann (rates diverge)', () => {
+  // GTI 3/16": c180_ann=14.13 ≠ c270_ann=12.88 — different products, different prices
+  const hardcoat = calcPane(pane({ coating: 'hardcoat', thickness: '3/16"', finish: 'annealed' }), 'glaz_tech');
+  const c270     = calcPane(pane({ coating: 'c270',     thickness: '3/16"', finish: 'annealed' }), 'glaz_tech');
+  assert.notStrictEqual(hardcoat.productCost, c270.productCost,
+    'hardcoat (c180) and c270 should price differently at GTI 3/16"');
 });
 
-test('c180 does not return requiresQuote', () => {
+test('c180 does not return requiresQuote at 1/8" Busick', () => {
   const r = calcPane(pane({ coating: 'c180', thickness: '1/8"', finish: 'annealed' }), 'busick');
   assert.strictEqual(r.requiresQuote, false);
+});
+
+test('c180 returns requiresQuote at 1/4" Busick (not available from Busick)', () => {
+  const r = calcPane(pane({ coating: 'c180', thickness: '1/4"', finish: 'annealed' }), 'busick');
+  assert.ok(r && r.requiresQuote === true, 'Busick 1/4" c180 should require a quote');
 });
 
 test('obscured coating returns requiresQuote (no rate in catalog)', () => {
@@ -577,7 +595,7 @@ test('calcJob accepts no difficulty argument', () => {
 
 test('calcJob skips panes that requiresQuote', () => {
   const panes = [
-    pane({ coating: 'c360', thickness: '1/4"', finish: 'annealed' }), // null rate → requiresQuote
+    pane({ coating: 'c180', thickness: '1/4"', finish: 'annealed' }), // Busick 1/4" c180 not available → requiresQuote
     pane({ coating: 'clear', thickness: '1/8"', finish: 'annealed' }),
   ];
   const job = calcJob(panes, 'busick');
@@ -654,117 +672,166 @@ test('FRAC_OPTS values are in ascending order', () => {
   }
 });
 
-// ─── L. Tiered markup system ─────────────────────────────────────────────────
+// ─── L. Flat sell multiplier — formula verification ──────────────────────────
 
-section('L. Tiered markup system — getMarkupTier + calcPane');
+section('L. Flat sell multiplier (3×) + supplier markup');
 
-test('getMarkupTier returns Tier 1 (Standard) for glassCost = $0', () => {
-  const t = getMarkupTier(0, DEFAULT_MARKUP_TIERS);
-  assert.strictEqual(t.name, 'Standard');
-  assert.strictEqual(t.multiplier, 3.00);
-});
-
-test('getMarkupTier returns Tier 1 (Standard) for glassCost = $150 (boundary)', () => {
-  const t = getMarkupTier(150, DEFAULT_MARKUP_TIERS);
-  assert.strictEqual(t.name, 'Standard');
-});
-
-test('getMarkupTier returns Tier 2 (Large) for glassCost = $150.01', () => {
-  const t = getMarkupTier(150.01, DEFAULT_MARKUP_TIERS);
-  assert.strictEqual(t.name, 'Large');
-  assert.strictEqual(t.multiplier, 2.75);
-});
-
-test('getMarkupTier returns Tier 2 (Large) for glassCost = $300 (boundary)', () => {
-  const t = getMarkupTier(300, DEFAULT_MARKUP_TIERS);
-  assert.strictEqual(t.name, 'Large');
-});
-
-test('getMarkupTier returns Tier 3 (Oversized) for glassCost = $300.01', () => {
-  const t = getMarkupTier(300.01, DEFAULT_MARKUP_TIERS);
-  assert.strictEqual(t.name, 'Oversized');
-  assert.strictEqual(t.multiplier, 2.50);
-});
-
-test('getMarkupTier returns Tier 3 (Oversized) for very large glassCost', () => {
-  const t = getMarkupTier(99999, DEFAULT_MARKUP_TIERS);
-  assert.strictEqual(t.name, 'Oversized');
-});
-
-test('getMarkupTier works with custom tier configuration', () => {
-  const custom = [
-    { id: 1, name: 'Budget', maxCost: 100, multiplier: 3.50 },
-    { id: 2, name: 'Premium', maxCost: null, multiplier: 2.00 },
-  ];
-  assert.strictEqual(getMarkupTier(50, custom).name, 'Budget');
-  assert.strictEqual(getMarkupTier(100, custom).name, 'Budget');
-  assert.strictEqual(getMarkupTier(101, custom).name, 'Premium');
-});
-
-test('calcPane returns tierName in result', () => {
-  const r = calcPane(pane({ width: 24, height: 36 }), 'busick');
-  assert.ok('tierName' in r, 'result should include tierName');
-  assert.strictEqual(typeof r.tierName, 'string');
-});
-
-test('small pane uses Tier 1 multiplier (3.0×) — glassCost well below $150', () => {
-  // 12×12, clear, 1/8", annealed, no grid → SF=1, glassCost = 7.72 → Tier 1
-  const r = calcPane(pane({ width: 12, height: 12, grid: 'none' }), 'busick');
-  const SF = (12 * 12) / 144;
-  const glassCost = SF * 7.72;
-  const expected = +(glassCost * 3.00).toFixed(2);
-  assert.ok(Math.abs(r.productCost - expected) < 0.01,
-    `Expected ${expected}, got ${r.productCost}`);
-  assert.strictEqual(r.tierName, 'Standard');
-});
-
-test('large pane uses Tier 2 multiplier (2.75×) — glassCost between $150 and $300', () => {
-  // 34×76, clear, 1/8", annealed, no grid
-  // SF = (34*76)/144 = 17.944..., glassCost = 17.944 * 7.72 ≈ 138.5 → barely Tier 1
-  // Use c360_temp to get higher raw rate: 20.39 $/SF → glassCost = 17.944 * 20.39 ≈ 365.9 → Tier 3
-  // Let's find a combo that lands in Tier 2 ($150–$300):
-  // 24×72 clear_ann: SF = (24*72)/144 = 12, glassCost = 12 * 7.72 = 92.64 → Tier 1
-  // 34×76 c270_temp: SF=17.944, glassCost = 17.944 * 18.53 ≈ 332.4 → Tier 3
-  // 24×72 c270_ann: SF=12, glassCost = 12 * 12.01 = 144.12 → Tier 1
-  // 24×84 c270_ann: SF=14, glassCost = 14 * 12.01 = 168.14 → Tier 2 ✓
-  appConfig.markup_tiers = null; // ensure defaults used
-  const r = calcPane(pane({ width: 24, height: 84, coating: 'c270', finish: 'annealed', grid: 'none' }), 'busick');
-  const SF = (24 * 84) / 144;
-  const glassCost = SF * 12.01;
-  assert.ok(glassCost > 150 && glassCost <= 300, `glassCost ${glassCost.toFixed(2)} should be in Tier 2 range`);
-  const expected = +(glassCost * 2.75).toFixed(2);
-  assert.ok(Math.abs(r.productCost - expected) < 0.01,
-    `Expected ${expected} (Tier 2 × 2.75), got ${r.productCost}`);
-  assert.strictEqual(r.tierName, 'Large');
-});
-
-test('oversized pane uses Tier 3 multiplier (2.5×) — glassCost above $300', () => {
-  // 34×76 c270_temp: SF=17.944, rawRate=18.53, glassCost ≈ 332.4 → Tier 3
-  appConfig.markup_tiers = null;
-  const r = calcPane(pane({ width: 34, height: 76, coating: 'c270', finish: 'tempered', grid: 'none' }), 'busick');
-  const SF = (34 * 76) / 144;
-  const glassCost = SF * 18.53;
-  assert.ok(glassCost > 300, `glassCost ${glassCost.toFixed(2)} should be above $300`);
-  const expected = +(glassCost * 2.50).toFixed(2);
-  assert.ok(Math.abs(r.productCost - expected) < 0.01,
-    `Expected ${expected} (Tier 3 × 2.50), got ${r.productCost}`);
-  assert.strictEqual(r.tierName, 'Oversized');
-});
-
-test('admin-configured markup_tiers override DEFAULT_MARKUP_TIERS', () => {
-  const custom = [
-    { id: 1, name: 'Base', maxCost: 500, multiplier: 4.00 },
-    { id: 2, name: 'XL', maxCost: null, multiplier: 3.00 },
-  ];
-  appConfig.markup_tiers = custom;
-  const r = calcPane(pane({ width: 24, height: 36, grid: 'none' }), 'busick');
-  assert.strictEqual(r.tierName, 'Base');
+test('productCost = SF × rawRate × markup × 3 for standard pane', () => {
+  // 24×36 clear ann Busick: SF=6, rate=7.72, markup=1.25 → companyCost=57.90, sell=173.70
+  const r = calcPane(pane({ width: 24, height: 36, coating: 'clear', finish: 'annealed', grid: 'none' }), 'busick');
   const SF = (24 * 36) / 144;
-  const glassCost = SF * 7.72;
-  const expected = +(glassCost * 4.00).toFixed(2);
-  assert.ok(Math.abs(r.productCost - expected) < 0.01,
-    `Expected ${expected} with custom 4.0× tier, got ${r.productCost}`);
-  appConfig.markup_tiers = null; // reset
+  const expected = +(SF * 7.72 * 1.25 * 3).toFixed(2);
+  assert.ok(Math.abs(r.productCost - expected) < 0.01, `Expected ${expected}, got ${r.productCost}`);
+});
+
+test('flat 3× applies to large pane (no tier reduction)', () => {
+  // 48×84 c270 ann Busick: SF=28, rate=12.01, markup=1.25 — previously fell in Oversized tier (2.5×), now 3×
+  const r = calcPane(pane({ width: 48, height: 84, coating: 'c270', finish: 'annealed', grid: 'none' }), 'busick');
+  const SF = (48 * 84) / 144;
+  const expected = +(SF * 12.01 * 1.25 * 3).toFixed(2);
+  assert.ok(Math.abs(r.productCost - expected) < 0.01, `Expected ${expected}, got ${r.productCost}`);
+});
+
+test('Busick (1.25×) and GTI (1.275×) markup produces different prices for same glass', () => {
+  const busick   = calcPane(pane({ coating: 'clear', finish: 'annealed', grid: 'none' }), 'busick');
+  const glaztech = calcPane(pane({ coating: 'clear', finish: 'annealed', grid: 'none' }), 'glaz_tech');
+  assert.notStrictEqual(busick.productCost, glaztech.productCost);
+});
+
+test('ROM SELL-AT reference: 1/8" Clear Ann Busick matches cost calc formula', () => {
+  // ROM SELL-AT shows $608.11 for 14.097 SF, Easy (1hr). Formula: 14.097 × 7.72 × 1.25 × 3 + 200 = $608.12
+  // 43×47 ≈ 14.04 SF — close enough to verify formula direction
+  const r = calcPane(pane({ width: 43, height: 47, coating: 'clear', finish: 'annealed', grid: 'none', laborHrs: 1.0 }), 'busick');
+  const SF = (43 * 47) / 144;
+  const expectedProduct = +(SF * 7.72 * 1.25 * 3).toFixed(2);
+  assert.ok(Math.abs(r.productCost - expectedProduct) < 0.01, `Expected ${expectedProduct}, got ${r.productCost}`);
+});
+
+test('grid adder is multiplied by supplier markup and sell multiplier', () => {
+  const noGrid = calcPane(pane({ width: 24, height: 36, grid: 'none'     }), 'busick');
+  const std    = calcPane(pane({ width: 24, height: 36, grid: 'standard' }), 'busick');
+  const SF = (24 * 36) / 144;
+  const sup = PRICE_CATALOG.suppliers.busick;
+  const expectedDiff = +(SF * sup.gridAdder * sup.markup * PRICE_CATALOG.sellMultiplier).toFixed(2);
+  assert.ok(Math.abs((std.productCost - noGrid.productCost) - expectedDiff) < 0.01,
+    `Grid diff should be ${expectedDiff}, got ${(std.productCost - noGrid.productCost).toFixed(2)}`);
+});
+
+test('calcPane result does not include tierName', () => {
+  const r = calcPane(pane(), 'busick');
+  assert.strictEqual('tierName' in r, false, 'result should not include tierName');
+});
+
+test('Busick 1/4" c360 now has real rates (not requiresQuote)', () => {
+  const r = calcPane(pane({ coating: 'c360', thickness: '1/4"', finish: 'annealed' }), 'busick');
+  assert.ok(r && !r.requiresQuote, 'Busick 1/4" c360 should price successfully');
+  const SF = (24 * 36) / 144;
+  const expected = +(SF * 13.39 * 1.25 * 3).toFixed(2);
+  assert.ok(Math.abs(r.productCost - expected) < 0.01, `Expected ${expected}, got ${r.productCost}`);
+});
+
+// ─── M. Glass weight — crew sizing and labor cost ────────────────────────────
+
+section('M. Glass weight and crew sizing');
+
+test('calcPaneWeight returns null when dimensions are missing', () => {
+  assert.strictEqual(calcPaneWeight({ thickness: '1/8"', width: 0, height: 36 }), null);
+});
+
+test('calcPaneWeight: 1/8" at 6 SF = 19.7 lbs', () => {
+  // 24×36 / 144 × 3.28 = 19.68 → 19.7
+  const w = calcPaneWeight({ width: 24, height: 36, thickness: '1/8"' });
+  assert.ok(Math.abs(w - 19.7) < 0.1, `Expected ~19.7, got ${w}`);
+});
+
+test('calcPaneWeight: 1/4" at 6 SF = 39.2 lbs', () => {
+  // 24×36 / 144 × 6.54 = 39.24 → 39.2
+  const w = calcPaneWeight({ width: 24, height: 36, thickness: '1/4"' });
+  assert.ok(Math.abs(w - 39.2) < 0.1, `Expected ~39.2, got ${w}`);
+});
+
+test('isHeavyLift false for ground-floor pane under 75 lbs', () => {
+  // 24×36 1/4" = ~39.2 lbs, ground floor → not heavy
+  assert.strictEqual(isHeavyLift({ width: 24, height: 36, thickness: '1/4"', storyLevel: 'ground' }), false);
+});
+
+test('isHeavyLift true when pane ≥75 lbs (any floor)', () => {
+  // 60×60 1/4": 3600/144 × 6.54 = 163.5 lbs → heavy
+  assert.strictEqual(isHeavyLift({ width: 60, height: 60, thickness: '1/4"', storyLevel: 'ground' }), true);
+});
+
+test('isHeavyLift true when ≥50 lbs on upper floor', () => {
+  // 40×50 1/4": 2000/144 × 6.54 = 90.8 lbs... too heavy. Use 1/8": 2000/144 × 3.28 = 45.6 lbs
+  // Try 55×48 1/8": 2640/144 × 3.28 = 60.1 lbs on upper → heavy
+  assert.strictEqual(isHeavyLift({ width: 55, height: 48, thickness: '1/8"', storyLevel: 'upper' }), true);
+});
+
+test('isHeavyLift false when 50–74 lbs on ground floor', () => {
+  // 55×48 1/8" = 60.1 lbs, ground floor → not heavy (only triggered on upper)
+  assert.strictEqual(isHeavyLift({ width: 55, height: 48, thickness: '1/8"', storyLevel: 'ground' }), false);
+});
+
+test('isHeavyLift false when <50 lbs on upper floor', () => {
+  // 24×36 1/8" = 19.7 lbs upper floor → not heavy
+  assert.strictEqual(isHeavyLift({ width: 24, height: 36, thickness: '1/8"', storyLevel: 'upper' }), false);
+});
+
+test('crewSize is 1 for light ground-floor pane', () => {
+  const r = calcPane(pane({ width: 24, height: 36, thickness: '1/8"', storyLevel: 'ground' }), 'busick');
+  assert.strictEqual(r.crewSize, 1);
+});
+
+test('crewSize is 2 for heavy pane (≥75 lbs)', () => {
+  // 60×60 1/4" = 163.5 lbs, any floor
+  const r = calcPane(pane({ width: 60, height: 60, thickness: '1/4"', storyLevel: 'ground' }), 'busick');
+  assert.strictEqual(r.crewSize, 2);
+});
+
+test('crewSize is 2 for 50–74 lb pane on upper floor', () => {
+  // 55×48 1/8" = 60.1 lbs on upper floor
+  const r = calcPane(pane({ width: 55, height: 48, thickness: '1/8"', storyLevel: 'upper' }), 'busick');
+  assert.strictEqual(r.crewSize, 2);
+});
+
+test('triple pane + grid doubles the grid adder (2 air spaces)', () => {
+  const withGrid    = calcPane(pane({ shape: 'triple_pane', grid: 'standard', width: 24, height: 36 }), 'busick');
+  const withoutGrid = calcPane(pane({ shape: 'triple_pane', grid: 'none',     width: 24, height: 36 }), 'busick');
+  const SF = (24 * 36) / 144;
+  const sup = PRICE_CATALOG.suppliers.busick;
+  // grid cost = SF × (gridAdder × 2) × shapeMult × markup × 3
+  const expectedGridDiff = +(SF * (sup.gridAdder * 2) * PRICE_CATALOG.shapeMultipliers.triple_pane * sup.markup * PRICE_CATALOG.sellMultiplier).toFixed(2);
+  assert.ok(
+    Math.abs((withGrid.productCost - withoutGrid.productCost) - expectedGridDiff) < 0.01,
+    `Triple pane grid diff should be ${expectedGridDiff}, got ${(withGrid.productCost - withoutGrid.productCost).toFixed(2)}`
+  );
+});
+
+test('standard shape grid adder is NOT doubled', () => {
+  const withGrid    = calcPane(pane({ shape: 'standard', grid: 'standard', width: 24, height: 36 }), 'busick');
+  const withoutGrid = calcPane(pane({ shape: 'standard', grid: 'none',     width: 24, height: 36 }), 'busick');
+  const SF = (24 * 36) / 144;
+  const sup = PRICE_CATALOG.suppliers.busick;
+  const expectedGridDiff = +(SF * sup.gridAdder * 1.0 * sup.markup * PRICE_CATALOG.sellMultiplier).toFixed(2);
+  assert.ok(
+    Math.abs((withGrid.productCost - withoutGrid.productCost) - expectedGridDiff) < 0.01,
+    `Standard grid diff should be ${expectedGridDiff}, got ${(withGrid.productCost - withoutGrid.productCost).toFixed(2)}`
+  );
+});
+
+test('labor cost doubles when crewSize is 2 (same laborHrs)', () => {
+  const light = calcPane(pane({ width: 24, height: 36, thickness: '1/8"', storyLevel: 'ground', laborHrs: 1.0 }), 'busick');
+  const heavy = calcPane(pane({ width: 60, height: 60, thickness: '1/4"', storyLevel: 'ground', laborHrs: 1.0 }), 'busick');
+  assert.strictEqual(light.laborCost, 200);
+  assert.strictEqual(heavy.laborCost, 400);
+});
+
+test('freshPane includes storyLevel defaulting to "ground"', () => {
+  assert.strictEqual(freshPane().storyLevel, 'ground');
+});
+
+test('weight is included in calcPane result', () => {
+  const r = calcPane(pane({ width: 24, height: 36, thickness: '1/8"' }), 'busick');
+  assert.ok(typeof r.weight === 'number', `weight should be a number, got ${typeof r.weight}`);
 });
 
 // ─── Summary ─────────────────────────────────────────────────────────────────

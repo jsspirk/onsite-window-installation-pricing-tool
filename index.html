@@ -1167,29 +1167,31 @@ const MAX_PANE_SIZE_IN = 120; // inches — trigger large-pane warning
 // multiplier already captures the full margin. Applying markup × 3 was double-charging.
 // null = requires custom quote (not in supplier price sheet)
 const PRICE_CATALOG = {
-  version: '2026-03-01',
-  laborRate: 200,            // $/hr — update when rate changes
+  version: '2026-07-14',
+  laborRate: 200,
+  sellMultiplier: 3,         // sell = companyCost × 3 (per COST CALCULATOR 2.27.2026)
   suppliers: {
     busick:    { name: 'Busick',    markup: 1.25,  gridAdder: 5.00  },
     glaz_tech: { name: 'Glaz-Tech', markup: 1.275, gridAdder: 3.75  },
     oldcastle: { name: 'Oldcastle', markup: 1.15,  gridAdder: 2.50  },
   },
-  // Raw $/SF from supplier price sheets (pre-markup). Key: `${coating}_${finish}`
+  // Raw $/SF from supplier invoices (pre-markup). Key: `${coating}_${finish}`
+  // c180 = Single-Coat Low-E; c270 = Double-Coat Low-E; c360 = Triple-Coat Low-E
   rates: {
     busick: {
-      '1/8"':  { clear_ann: 7.72,  clear_temp: 11.97, c270_ann: 12.01, c270_temp: 18.53, c360_ann: 13.90, c360_temp: 20.39 },
-      '3/16"': { clear_ann: 8.66,  clear_temp: 13.00, c270_ann: 13.98, c270_temp: 19.24, c360_ann: 15.40, c360_temp: 22.40 },
-      '1/4"':  { clear_ann: 8.66,  clear_temp: 13.00, c270_ann: 13.98, c270_temp: 19.24, c360_ann: null,  c360_temp: null  },
+      '1/8"':  { clear_ann: 7.72, clear_temp: 11.97, c180_ann: 12.01, c180_temp: 18.53, c270_ann: 12.01, c270_temp: 18.53, c360_ann: 13.90, c360_temp: 20.39 },
+      '3/16"': { clear_ann: 8.66, clear_temp: 13.00, c180_ann: 13.98, c180_temp: 19.24, c270_ann: 13.98, c270_temp: 19.24, c360_ann: 15.40, c360_temp: 22.40 },
+      '1/4"':  { clear_ann: 8.66, clear_temp: 13.00, c180_ann: null,  c180_temp: null,  c270_ann: 13.98, c270_temp: 19.24, c360_ann: 13.39, c360_temp: 19.48 },
     },
     glaz_tech: {
-      '1/8"':  { clear_ann: 9.95,  clear_temp: 11.04, c270_ann: 12.21, c270_temp: 13.75, c360_ann: 13.89, c360_temp: 15.50 },
-      '3/16"': { clear_ann: 11.82, clear_temp: 14.22, c270_ann: 12.88, c270_temp: 16.58, c360_ann: 15.52, c360_temp: 17.67 },
-      '1/4"':  { clear_ann: 11.94, clear_temp: 14.35, c270_ann: 14.13, c270_temp: 17.76, c360_ann: 15.85, c360_temp: 18.41 },
+      '1/8"':  { clear_ann: 9.95,  clear_temp: 11.04, c180_ann: 12.21, c180_temp: 13.66, c270_ann: 12.21, c270_temp: 13.75, c360_ann: 13.89, c360_temp: 15.50 },
+      '3/16"': { clear_ann: 11.82, clear_temp: 14.22, c180_ann: 14.13, c180_temp: 16.73, c270_ann: 12.88, c270_temp: 16.58, c360_ann: 15.52, c360_temp: 17.67 },
+      '1/4"':  { clear_ann: 11.94, clear_temp: 14.35, c180_ann: 14.22, c180_temp: 16.52, c270_ann: 14.13, c270_temp: 17.76, c360_ann: 15.85, c360_temp: 18.41 },
     },
     oldcastle: {
-      '1/8"':  { clear_ann: 8.40,  clear_temp: 10.64, c270_ann: 11.82, c270_temp: 14.06, c360_ann: 13.27, c360_temp: 15.79 },
-      '3/16"': { clear_ann: 9.80,  clear_temp: 12.04, c270_ann: 14.78, c270_temp: 17.02, c360_ann: null,  c360_temp: 17.78 },
-      '1/4"':  { clear_ann: 8.04,  clear_temp:  9.50, c270_ann: 10.51, c270_temp: 12.54, c360_ann: 12.25, c360_temp: 14.25 },
+      '1/8"':  { clear_ann: 8.40, clear_temp: 10.64, c180_ann: 11.82, c180_temp: 14.03, c270_ann: 11.82, c270_temp: 14.06, c360_ann: 13.27, c360_temp: 15.79 },
+      '3/16"': { clear_ann: 9.80, clear_temp: 12.04, c180_ann: 12.82, c180_temp: 15.06, c270_ann: 14.78, c270_temp: 17.02, c360_ann: null,  c360_temp: 17.78 },
+      '1/4"':  { clear_ann: 8.04, clear_temp:  9.50, c180_ann: 13.94, c180_temp: 16.18, c270_ann: 10.51, c270_temp: 12.54, c360_ann: 12.25, c360_temp: 14.25 },
     },
   },
   shapeMultipliers: {
@@ -1202,6 +1204,16 @@ const PRICE_CATALOG = {
     circle:        2.00,
     octagon:       2.00,
     triple_pane:   1.75,
+  },
+  // IG unit weight in lbs/SF by lite thickness (from Glass Weight Calculator tab)
+  glassWeights: {
+    '1/8"':  3.28,
+    '3/16"': 4.90,
+    '1/4"':  6.54,
+  },
+  weightThresholds: {
+    heavy:    75,  // ≥75 lbs → 2-tech (any floor)
+    elevated: 50,  // ≥50 lbs + upper floor → 2-tech
   },
 };
 
@@ -1226,6 +1238,22 @@ function getMarkupTier(glassCost, tiers) {
     return a.maxCost - b.maxCost;
   });
   return sorted.find(t => t.maxCost === null || glassCost <= t.maxCost) || sorted[sorted.length - 1];
+}
+
+// Estimated IG unit weight in lbs based on ceiling dimensions and thickness.
+function calcPaneWeight(pane) {
+  if (!pane.width || !pane.height || !pane.thickness) return null;
+  const lbsPerSF = PRICE_CATALOG.glassWeights[pane.thickness];
+  if (!lbsPerSF) return null;
+  return +((pane.width * pane.height) / 144 * lbsPerSF).toFixed(1);
+}
+
+// Returns true when the unit weight + floor level trigger the 2-tech higher labor rate.
+function isHeavyLift(pane) {
+  const w = calcPaneWeight(pane);
+  if (w === null) return false;
+  const { heavy, elevated } = PRICE_CATALOG.weightThresholds;
+  return w >= heavy || (pane.storyLevel === 'upper' && w >= elevated);
 }
 
 const DEFAULT_USERS = [
@@ -1359,8 +1387,8 @@ function calcPane(pane, supplier) {
   const qty       = pane.qty || 1;
   const SF        = (w_in * h_in) / 144;
   const finishKey = pane.finish === 'annealed' ? 'ann' : 'temp';
-  // c180 and hardcoat price the same as c270 (Double Hardcoat)
-  const coatingKey = (pane.coating === 'c180' || pane.coating === 'hardcoat') ? 'c270' : pane.coating;
+  // hardcoat is single-coat low-e — maps to c180 rate key
+  const coatingKey = pane.coating === 'hardcoat' ? 'c180' : pane.coating;
   const rateKey   = `${coatingKey}_${finishKey}`;
   const sup       = PRICE_CATALOG.suppliers[supplier] || PRICE_CATALOG.suppliers.busick;
   const rawRate   = PRICE_CATALOG.rates[supplier]?.[pane.thickness]?.[rateKey];
@@ -1368,17 +1396,17 @@ function calcPane(pane, supplier) {
   if (rawRate === null || rawRate === undefined) return { requiresQuote: true };
 
   // Backward compat: support old gridEnabled bool and new grid string
-  const gridMode      = pane.grid !== undefined ? pane.grid : (pane.gridEnabled ? 'standard' : 'none');
-  const gridAdder     = gridMode !== 'none' ? sup.gridAdder : 0;
+  const gridMode       = pane.grid !== undefined ? pane.grid : (pane.gridEnabled ? 'standard' : 'none');
+  const gridAdder      = gridMode !== 'none' ? sup.gridAdder * (pane.shape === 'triple_pane' ? 2 : 1) : 0;
   const customGridFlat = gridMode === 'custom' ? 50 : 0;
-  const shapeMult     = PRICE_CATALOG.shapeMultipliers[pane.shape] || 1.0;
-  const glassCost     = SF * (rawRate + gridAdder) * shapeMult;
-  const tier          = getMarkupTier(glassCost, appConfig.markup_tiers || DEFAULT_MARKUP_TIERS);
-  const laborHrs      = pane.laborHrs ?? 1.0;  // default 1 hr for old panes
-  const laborCost     = laborHrs * PRICE_CATALOG.laborRate;
-  const productCost   = +(glassCost * tier.multiplier * qty + customGridFlat * qty).toFixed(2);
-  const laborTotal    = +(laborCost * qty).toFixed(2);
-  const lineTotal     = +(productCost + laborTotal).toFixed(2);
+  const shapeMult      = PRICE_CATALOG.shapeMultipliers[pane.shape] || 1.0;
+  const glassCost      = SF * (rawRate + gridAdder) * shapeMult * sup.markup;
+  const laborHrs       = pane.laborHrs ?? 1.0;
+  const crewSize       = isHeavyLift(pane) ? 2 : 1;
+  const laborCost      = laborHrs * crewSize * PRICE_CATALOG.laborRate;
+  const productCost    = +(glassCost * PRICE_CATALOG.sellMultiplier * qty + customGridFlat * qty).toFixed(2);
+  const laborTotal     = +(laborCost * qty).toFixed(2);
+  const lineTotal      = +(productCost + laborTotal).toFixed(2);
 
   return {
     sqft:          +(SF * qty).toFixed(4),
@@ -1388,7 +1416,8 @@ function calcPane(pane, supplier) {
     lineTotal,
     requiresQuote: false,
     gridMode,
-    tierName:      tier.name,
+    weight:        calcPaneWeight(pane),
+    crewSize,
   };
 }
 
@@ -1465,6 +1494,7 @@ function normalizeQuote(row) {
       height:      parseFloat(p.height),
       unit:        p.unit,
       laborHrs:    parseFloat(p.labor_hrs),
+      storyLevel:  p.story_level || 'ground',
     }));
   return {
     id:              row.id,
@@ -1550,6 +1580,7 @@ async function syncQuoteToSupabase(quote, panes) {
     height:       p.height,
     unit:         p.unit        || 'in',
     labor_hrs:    p.laborHrs    ?? 1.0,
+    story_level:  p.storyLevel  || 'ground',
   }));
   const { error } = await sb.from('quotes').upsert(quoteRow);
   if (!error) {
@@ -1728,6 +1759,7 @@ function freshPane(from) {
     height:      0,   // ceiling value — used by calcPane
     unit:        'in',
     laborHrs:    1.0,
+    storyLevel:  'ground',  // 'ground' | 'upper'
   };
 }
 
@@ -2061,15 +2093,6 @@ function renderNewQuoteStep1() {
         </div>
       </div>
 
-      <div class="form-group mb-12">
-        <label class="form-label">Install Time</label>
-        <div class="qty-stepper" style="max-width:190px;">
-          <button class="qty-btn" id="labor-dec">−</button>
-          <span class="qty-val" id="labor-val">${(cp.laborHrs||1.0).toFixed(2)} hr</span>
-          <button class="qty-btn" id="labor-inc">+</button>
-        </div>
-      </div>
-
       <div class="section-label mb-8">Dimensions <span style="text-transform:none;font-weight:400;color:var(--text-2);">(block, in)</span></div>
 
       <!-- WIDTH -->
@@ -2120,6 +2143,70 @@ function renderNewQuoteStep1() {
           </div>`).join('')}
       </div>
 
+      <div class="divider"></div>
+
+      ${(() => {
+        const w              = calcPaneWeight(cp);
+        const heavy          = isHeavyLift(cp);
+        const { elevated: elevatedThresh } = PRICE_CATALOG.weightThresholds;
+        const SF             = (cp.width && cp.height) ? +((cp.width * cp.height) / 144).toFixed(1) : null;
+        const lbsPerSF       = cp.thickness ? PRICE_CATALOG.glassWeights[cp.thickness] : null;
+
+        // ── Weight callout ──────────────────────────────────────────
+        let weightSection = '';
+        if (w !== null) {
+          if (heavy) {
+            weightSection = `
+      <div style="border-radius:var(--radius-md);overflow:hidden;margin-bottom:12px;border:1px solid var(--orange);">
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:color-mix(in srgb,var(--orange) 12%,var(--bg-2));">
+          <div style="flex:1;">
+            <div style="font-family:var(--font-title);font-weight:800;font-size:15px;letter-spacing:0.5px;text-transform:uppercase;color:var(--orange);line-height:1.2;">Heavy Lift · ${w} lbs</div>
+            <div style="font-size:12px;color:var(--text-2);margin-top:2px;">${SF} SF × ${lbsPerSF} lbs/SF (${cp.thickness})</div>
+          </div>
+          <span style="background:var(--orange);color:#fff;font-family:var(--font-title);font-weight:800;font-size:12px;letter-spacing:1px;padding:4px 10px;border-radius:100px;flex-shrink:0;">2-TECH</span>
+        </div>
+        <div style="padding:8px 14px;background:color-mix(in srgb,var(--orange) 6%,var(--bg-2));border-top:1px solid color-mix(in srgb,var(--orange) 20%,var(--border-1));font-size:12px;color:var(--text-2);">Plan for a 2-tech install — labor will be billed at ×2 rate.</div>
+      </div>`;
+          } else if (w >= elevatedThresh) {
+            weightSection = `
+      <div style="padding:12px 14px;background:color-mix(in srgb,var(--amber) 7%,var(--bg-2));border:1px solid color-mix(in srgb,var(--amber) 30%,var(--border-0));border-radius:var(--radius-md);margin-bottom:12px;">
+        <div style="font-size:14px;color:var(--text-1);">Est. weight: <strong style="color:var(--amber);">${w} lbs</strong></div>
+        <div style="font-size:12px;color:var(--text-2);margin-top:2px;">${SF} SF × ${lbsPerSF} lbs/SF (${cp.thickness})</div>
+        <div style="font-size:12px;color:var(--amber);margin-top:4px;">Upper floor jobs at this weight require 2 techs.</div>
+      </div>`;
+          } else {
+            weightSection = `
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg-2);border-radius:var(--radius-md);margin-bottom:12px;">
+        <span style="font-size:14px;color:var(--text-2);">Est. weight: <strong style="color:var(--text-1);">${w} lbs</strong></span>
+        <span style="font-size:12px;color:var(--text-3);">${SF} SF × ${lbsPerSF} lbs/SF (${cp.thickness})</span>
+      </div>`;
+          }
+        }
+
+        // ── Floor Level — only when weight makes upper floor threshold relevant ──
+        const floorSection = (w !== null && w >= elevatedThresh) ? `
+      <div class="section-label mb-8">Floor Level</div>
+      <div class="chip-group mb-12">
+        <div class="chip ${(cp.storyLevel||'ground')==='ground'?'active':''}" data-story-level="ground">Ground</div>
+        <div class="chip ${cp.storyLevel==='upper'?'active':''}" data-story-level="upper">Upper Floor</div>
+      </div>` : '';
+
+        // ── Install Time ────────────────────────────────────────────
+        const laborHrs   = cp.laborHrs || 1.0;
+        const billedHrs  = heavy ? laborHrs * 2 : laborHrs;
+        const flagLabel  = heavy ? ` <span style="font-size:11px;font-weight:700;color:var(--orange);letter-spacing:0.5px;text-transform:uppercase;">· 2-Tech · Labor ×2</span>` : '';
+        const billedLine = heavy ? `
+      <div style="margin-top:6px;font-size:13px;color:var(--text-2);">Billed as ${billedHrs.toFixed(1)} hr&ensp;<span style="color:var(--text-3);">(2 techs × ${laborHrs.toFixed(2)} hr)</span></div>` : '';
+
+        return `${weightSection}${floorSection}
+      <div class="section-label mb-8">Install Time${flagLabel}</div>
+      <div class="qty-stepper" style="max-width:190px;">
+        <button class="qty-btn" id="labor-dec">−</button>
+        <span class="qty-val" id="labor-val">${laborHrs.toFixed(2)} hr</span>
+        <button class="qty-btn" id="labor-inc">+</button>
+      </div>${billedLine}`;
+      })()}
+
     </div>
 
     <!-- PRICE PREVIEW -->
@@ -2136,7 +2223,7 @@ function renderNewQuoteStep1() {
         <span class="price-row-value">${fmt(paneCalc.productCost)}</span>
       </div>
       <div class="price-row">
-        <span class="price-row-label">Labor (${(cp.laborHrs||1.0).toFixed(2)} hr)</span>
+        <span class="price-row-label">Labor (${(cp.laborHrs||1.0).toFixed(2)} hr${paneCalc.crewSize>1?' × 2 techs':''})</span>
         <span class="price-row-value">${fmt(paneCalc.laborCost)}</span>
       </div>
       <div class="price-total-row">
@@ -2313,10 +2400,10 @@ function renderReview() {
         <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">${fmtMeasured(p.widthWhole||p.width, p.widthFrac||'')}" × ${fmtMeasured(p.heightWhole||p.height, p.heightFrac||'')}"\u2009${p.widthFrac||p.heightFrac?`<span style="color:var(--text-3);">(priced at ${p.width}" × ${p.height}")</span>`:''} ${r&&!r.requiresQuote?'· '+r.sqft.toFixed(2)+' sqft':''}</div>
         <div class="divider-dashed"></div>
         <div class="price-row">
-          <span class="price-row-label" style="font-size:13px;">Glass / Product${pGridMode!=='none'?' (incl. grid)':''}${p.shape&&p.shape!=='standard'?' · '+p.shape.replace(/_/g,' '):''}${r&&!r.requiresQuote?' · '+r.tierName:''}</span>
+          <span class="price-row-label" style="font-size:13px;">Glass / Product${pGridMode!=='none'?' (incl. grid)':''}${p.shape&&p.shape!=='standard'?' · '+p.shape.replace(/_/g,' '):''}</span>
           <span class="price-row-value" style="font-size:15px;">${r&&!r.requiresQuote?fmt(r.productCost):'QUOTE'}</span>
         </div>
-        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Labor (${(p.laborHrs??1.0).toFixed(2)} hr)</span><span class="price-row-value" style="font-size:15px;">${r&&!r.requiresQuote?fmt(r.laborCost):'—'}</span></div>
+        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Labor (${(p.laborHrs??1.0).toFixed(2)} hr${r&&!r.requiresQuote&&r.crewSize>1?' × 2 techs':''})</span><span class="price-row-value" style="font-size:15px;">${r&&!r.requiresQuote?fmt(r.laborCost):'—'}</span></div>
       </div>`;
     }).join('')}
 
@@ -2579,10 +2666,12 @@ function renderAdminGlassTypes() {
   const glassKeys = [
     { key:'clear_ann',  label:'Clear, Annealed' },
     { key:'clear_temp', label:'Clear, Tempered' },
-    { key:'c270_ann',   label:'C270/272, Annealed' },
-    { key:'c270_temp',  label:'C270/272, Tempered' },
-    { key:'c360_ann',   label:'C360/366, Annealed' },
-    { key:'c360_temp',  label:'C360/366, Tempered' },
+    { key:'c180_ann',   label:'Single-Coat (C180), Annealed' },
+    { key:'c180_temp',  label:'Single-Coat (C180), Tempered' },
+    { key:'c270_ann',   label:'Double-Coat (C270/272), Annealed' },
+    { key:'c270_temp',  label:'Double-Coat (C270/272), Tempered' },
+    { key:'c360_ann',   label:'Triple-Coat (C360/366), Annealed' },
+    { key:'c360_temp',  label:'Triple-Coat (C360/366), Tempered' },
   ];
   const thicknesses = ['1/8"','3/16"','1/4"'];
   return `
@@ -2681,8 +2770,8 @@ function renderAdminMaterials() {
     <div class="section-label mb-8">Pricing Formula Reference</div>
     <div style="font-size:13px;color:var(--text-2);line-height:2.0;font-family:monospace;">
       <div>SF = (width × height) / 144</div>
-      <div>glassCost = SF × (rawRate + gridAdder) × shapeMult</div>
-      <div>paneTotal = glassCost × tier.multiplier + laborHrs × $${PRICE_CATALOG.laborRate}</div>
+      <div>glassCost = SF × (rawRate + gridAdder) × shapeMult × supplierMarkup</div>
+      <div>paneTotal = glassCost × ${PRICE_CATALOG.sellMultiplier} + laborHrs × $${PRICE_CATALOG.laborRate}</div>
       <div>range = paneTotal × (1 ± band), floor $400</div>
     </div>
   </div>
@@ -2690,63 +2779,19 @@ function renderAdminMaterials() {
 }
 
 function renderAdminPricingTiers() {
-  if (!app.draftTiers) {
-    app.draftTiers = JSON.parse(JSON.stringify(appConfig.markup_tiers || DEFAULT_MARKUP_TIERS));
-  }
-  const tiers = [...app.draftTiers].sort((a, b) => {
-    if (a.maxCost === null) return 1;
-    if (b.maxCost === null) return -1;
-    return a.maxCost - b.maxCost;
-  });
   return `
 <div>
-  <div class="section-label mb-8">Markup Tiers</div>
+  <div class="section-label mb-8">Sell Multiplier</div>
   <div style="font-size:13px;color:var(--text-2);margin-bottom:16px;">
-    Glass sell price = raw cost × multiplier. Tier is selected by raw glass cost per panel.
-    Techs see tier names only — multiplier values are hidden from them.
+    Glass sell price = supplier invoice cost × ${PRICE_CATALOG.sellMultiplier}. Applied uniformly to all glass types and job sizes.
   </div>
-
-  ${tiers.map((tier, i) => {
-    const prevMax = i > 0 ? tiers[i-1].maxCost : 0;
-    const rangeLabel = tier.maxCost !== null
-      ? `$${prevMax} – $${tier.maxCost}`
-      : prevMax > 0 ? `> $${prevMax}` : 'All';
-    return `
-  <div class="card mb-10" data-tier-id="${tier.id}">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-      <div style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:.05em;">TIER ${i+1} &nbsp;·&nbsp; ${rangeLabel}</div>
-      ${tiers.length > 1 ? `<button class="btn btn-danger btn-sm" data-tier-remove="${tier.id}">Remove</button>` : ''}
+  <div class="card" style="display:flex;align-items:center;gap:16px;">
+    <div style="font-size:40px;font-family:var(--font-title);font-weight:800;color:var(--amber);flex-shrink:0;">${PRICE_CATALOG.sellMultiplier}×</div>
+    <div style="font-size:13px;color:var(--text-2);line-height:1.6;">
+      Per COST CALCULATOR 2.27.2026.<br>
+      To change, update <code>sellMultiplier</code> in <code>PRICE_CATALOG</code> in the source.
     </div>
-    <div class="form-group mb-10">
-      <label class="form-label">Name (shown to techs)</label>
-      <input class="form-input" data-tier-name="${tier.id}" value="${tier.name}" placeholder="e.g. Standard" />
-    </div>
-    <div style="display:flex;gap:10px;">
-      <div class="form-group" style="flex:1;">
-        <label class="form-label">Max glass cost ($)</label>
-        <input class="form-input" type="number" min="0" step="1" data-tier-maxcost="${tier.id}"
-          value="${tier.maxCost !== null ? tier.maxCost : ''}" placeholder="No limit" />
-      </div>
-      <div class="form-group" style="flex:1;">
-        <label class="form-label">Multiplier</label>
-        <div style="display:flex;align-items:center;gap:6px;">
-          <input class="form-input" type="number" min="0.1" step="0.05" data-tier-mult="${tier.id}"
-            value="${tier.multiplier}" />
-          <span style="font-size:15px;color:var(--text-2);flex-shrink:0;">×</span>
-        </div>
-      </div>
-    </div>
-  </div>`;
-  }).join('')}
-
-  <div style="display:flex;gap:10px;margin-top:12px;">
-    <button class="btn btn-secondary" id="tier-add-btn" style="flex:1;">+ Add Tier</button>
-    <button class="btn btn-primary" id="tier-save-btn" style="flex:1;">Save Tiers</button>
   </div>
-  ${appConfig.markup_tiers ? '' : `
-  <div style="font-size:12px;color:var(--text-3);margin-top:12px;text-align:center;">
-    Showing defaults — save to lock in your configuration.
-  </div>`}
 </div>`;
 }
 
@@ -2847,7 +2892,7 @@ function renderQuoteDetail() {
         </div>
         <div class="divider-dashed"></div>
         <div class="price-row"><span class="price-row-label" style="font-size:13px;">Glass / Product</span><span class="price-row-value" style="font-size:14px;">${r && !r.requiresQuote ? fmt(r.productCost) : 'QUOTE'}</span></div>
-        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Labor (${(p.laborHrs ?? 1.0).toFixed(2)} hr)</span><span class="price-row-value" style="font-size:14px;">${r && !r.requiresQuote ? fmt(r.laborCost) : '—'}</span></div>
+        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Labor (${(p.laborHrs ?? 1.0).toFixed(2)} hr${r && !r.requiresQuote && r.crewSize > 1 ? ' × 2 techs' : ''})</span><span class="price-row-value" style="font-size:14px;">${r && !r.requiresQuote ? fmt(r.laborCost) : '—'}</span></div>
         <div class="price-row" style="margin-top:4px;">
           <span class="price-row-label" style="font-size:13px;font-weight:600;color:var(--text-1);">Pane Estimate</span>
           <span class="price-row-value" style="font-size:15px;color:var(--amber);font-weight:700;">${r && !r.requiresQuote ? fmtRange(r.lineTotal) : '—'}</span>
@@ -3208,11 +3253,12 @@ function attachEvents() {
 
 
   // Glass spec chips
-  delegate('[data-thickness]', 'click', e => { app.draft.currentPane.thickness = e.currentTarget.dataset.thickness; render(); });
-  delegate('[data-coating]',   'click', e => { app.draft.currentPane.coating   = e.currentTarget.dataset.coating;   render(); });
-  delegate('[data-finish]',    'click', e => { app.draft.currentPane.finish    = e.currentTarget.dataset.finish;    render(); });
-  delegate('[data-shape]',     'click', e => { app.draft.currentPane.shape     = e.currentTarget.dataset.shape;     render(); });
-  delegate('[data-grid]',      'click', e => { app.draft.currentPane.grid      = e.currentTarget.dataset.grid;      render(); });
+  delegate('[data-thickness]',   'click', e => { app.draft.currentPane.thickness  = e.currentTarget.dataset.thickness;  render(); });
+  delegate('[data-coating]',     'click', e => { app.draft.currentPane.coating    = e.currentTarget.dataset.coating;    render(); });
+  delegate('[data-finish]',      'click', e => { app.draft.currentPane.finish     = e.currentTarget.dataset.finish;     render(); });
+  delegate('[data-shape]',       'click', e => { app.draft.currentPane.shape      = e.currentTarget.dataset.shape;      render(); });
+  delegate('[data-grid]',        'click', e => { app.draft.currentPane.grid       = e.currentTarget.dataset.grid;       render(); });
+  delegate('[data-story-level]', 'click', e => { app.draft.currentPane.storyLevel = e.currentTarget.dataset.storyLevel; render(); });
 
   // Admin settings — write to Supabase, update appConfig in memory
   delegate('[data-admin-supplier]', 'click', async e => {
@@ -3346,7 +3392,7 @@ function attachEvents() {
     if (d.editingPaneIdx === null || d.editingPaneIdx === undefined) return false;
     const stored = d.panes[d.editingPaneIdx];
     const cp = d.currentPane;
-    const keys = ['thickness','coating','finish','grid','shape','location','qty','width','height','widthWhole','widthFrac','heightWhole','heightFrac','laborHrs'];
+    const keys = ['thickness','coating','finish','grid','shape','location','qty','width','height','widthWhole','widthFrac','heightWhole','heightFrac','laborHrs','storyLevel'];
     return keys.some(k => String(cp[k]) !== String(stored[k]));
   };
 
