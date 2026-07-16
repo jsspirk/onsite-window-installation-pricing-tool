@@ -517,6 +517,19 @@
       transition: all 0.15s;
     }
     .pane-item-remove:active { border-color: var(--red); transform: scale(0.9); }
+    .pane-item-edit {
+      width: 36px; height: 36px;
+      background: var(--bg-3);
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      color: var(--text-2);
+      font-size: 16px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.15s;
+    }
+    .pane-item-edit:active { border-color: var(--amber); color: var(--amber); transform: scale(0.9); }
 
     /* ================================================================
        STATUS BADGES
@@ -1880,6 +1893,18 @@ function render() {
 /* ================================================================
    RENDER: CONNECTION BADGE
 ================================================================ */
+function headerNavIcons(opts = {}) {
+  const u = app.currentUser;
+  const isAdmin = u?.role === 'admin';
+  const hasDraft = app.draft && (app.draft.customerName || app.draft.panes?.length > 0);
+  return `
+    ${opts.showHome !== false ? `<button class="icon-btn" data-nav-home title="Home">⌂</button>` : ''}
+    ${opts.showHistory !== false ? `<button class="icon-btn" data-nav-history title="Job Log">☰</button>` : ''}
+    ${isAdmin && opts.showAdmin !== false ? `<button class="icon-btn" data-nav-admin title="Admin">⚙</button>` : ''}
+    ${connBadge()}
+  `;
+}
+
 function connBadge() {
   const isLight = document.documentElement.dataset.theme === 'light';
   const badge = app.isOnline
@@ -1959,9 +1984,10 @@ function renderHome() {
       ? `<img src="${brand.logoHoriz}" alt="${brand.name}" style="height:42px;max-width:240px;object-fit:contain;" />`
       : `<div class="header-logo">${brand.name}</div>`}
     <div class="header-right">
-      ${connBadge()}
-      ${u.role === 'admin' ? `<button class="icon-btn" id="home-admin-btn" title="Admin Panel">⚙️</button>` : ''}
+      <button class="icon-btn" data-nav-history title="Job Log">☰</button>
+      ${u.role === 'admin' ? `<button class="icon-btn" data-nav-admin title="Admin Panel">⚙</button>` : ''}
       <button class="icon-btn" id="home-logout-btn" title="Sign Out">⎋</button>
+      ${connBadge()}
     </div>
   </div>
 
@@ -2098,7 +2124,7 @@ function renderNewQuoteStep1() {
   <div class="app-header">
     <button class="header-back-btn" id="${d.isAdminEdit ? 'back-to-quote-detail' : 'back-home'}">←</button>
     <div class="header-title">${d.isAdminEdit ? 'Edit Pane' : 'New Quote'}</div>
-    <div class="header-right">${connBadge()}</div>
+    <div class="header-right">${headerNavIcons({ showHome: false, showAdmin: false })}</div>
   </div>
   ${d.isAdminEdit ? '' : stepIndicator(0)}
 
@@ -2341,7 +2367,7 @@ function renderNewQuoteStep2() {
   <div class="app-header">
     <button class="header-back-btn" id="back-step1">←</button>
     <div class="header-title">Pane List</div>
-    <div class="header-right">${connBadge()}</div>
+    <div class="header-right">${headerNavIcons({ showHome: false, showAdmin: false })}</div>
   </div>
   ${stepIndicator(1)}
 
@@ -2366,6 +2392,7 @@ function renderNewQuoteStep2() {
           </div>
         </div>
         <div class="pane-item-price">${r&&!r.requiresQuote?fmtRange(r.lineTotal):'—'}</div>
+        <button class="pane-item-edit" data-edit-pane-step2="${i}" title="Edit pane">✎</button>
         <button class="pane-item-remove" data-remove-pane="${p.id}">✕</button>
       </div>`;
     }).join('')}
@@ -2413,7 +2440,7 @@ function renderReview() {
   <div class="app-header">
     <button class="header-back-btn" id="${d.isAdminEdit ? 'back-to-admin-log' : 'back-to-pane-list'}">←</button>
     <div class="header-title">${d.isAdminEdit ? 'Edit Quote' : 'Quote Review'}</div>
-    <div class="header-right">${connBadge()}</div>
+    <div class="header-right">${headerNavIcons({ showHome: false, showAdmin: false })}</div>
   </div>
   ${d.isAdminEdit ? '' : stepIndicator(2)}
 
@@ -2600,7 +2627,7 @@ function renderSent() {
     ${brand.logoHoriz
       ? `<img src="${brand.logoHoriz}" alt="${brand.name}" style="height:42px;max-width:240px;object-fit:contain;" />`
       : `<div class="header-logo">${brand.name}</div>`}
-    <div class="header-right">${connBadge()}</div>
+    <div class="header-right">${headerNavIcons({ showHistory: true, showAdmin: false })}</div>
   </div>
 
   <div class="success-screen">
@@ -2658,8 +2685,8 @@ function renderHistory() {
 <div class="screen" style="background:var(--bg-0);">
   <div class="app-header">
     <button class="header-back-btn" id="back-home-from-history">←</button>
-    <div class="header-title">Quote History</div>
-    <div class="header-right">${connBadge()}</div>
+    <div class="header-title">Job Log</div>
+    <div class="header-right">${headerNavIcons({ showHistory: false })}</div>
   </div>
 
   <div style="padding:12px 16px;background:var(--bg-1);border-bottom:1px solid var(--border-1);">
@@ -2710,7 +2737,7 @@ function renderAdmin() {
   <div class="app-header">
     <button class="header-back-btn" id="back-home-admin">←</button>
     <div class="header-title">Admin Panel</div>
-    <div class="header-right">${connBadge()}</div>
+    <div class="header-right">${headerNavIcons({ showAdmin: false })}</div>
   </div>
 
   <div class="tabs">
@@ -2928,7 +2955,7 @@ function renderQuoteDetail() {
   <div class="app-header">
     <button class="header-back-btn" id="back-home-from-detail">←</button>
     <div class="header-title">Quote Detail</div>
-    <div class="header-right">${connBadge()}</div>
+    <div class="header-right">${headerNavIcons({ showAdmin: false })}</div>
   </div>
 
   <div class="scroll-content" style="padding-bottom:180px;">
@@ -2994,6 +3021,7 @@ function renderQuoteDetail() {
   </div>
 
   <!-- Action Bar -->
+  ${app.currentUser?.role === 'admin' ? `
   <div class="action-bar" style="flex-direction:column;gap:10px;">
     <div style="font-size:12px;color:var(--text-2);font-family:var(--font-semi);font-weight:600;letter-spacing:0.05em;">QUOTE STATUS</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -3006,6 +3034,11 @@ function renderQuoteDetail() {
       <button class="btn btn-primary" id="admin-edit-save" style="flex:2;">✓ Save Quote</button>
     </div>
   </div>
+  ` : `
+  <div class="action-bar">
+    <button class="btn btn-primary btn-full" id="tech-save-detail">✓ Save Changes</button>
+  </div>
+  `}
 </div>`;
 }
 
@@ -3225,14 +3258,9 @@ function attachEvents() {
   on('home-admin-btn2', 'click', () => navigate('admin'));
   on('view-all-history', 'click', () => navigate('history'));
 
-  // History items on home — admin goes to quote-detail, tech goes to review
+  // History items — both admin and tech go to quote-detail
   delegate('[data-quote-id]', 'click', e => {
-    const id = e.currentTarget.dataset.quoteId;
-    if (app.currentUser?.role === 'admin') {
-      openAdminQuote(id);
-    } else {
-      viewQuoteFromHistory(id);
-    }
+    viewQuoteFromHistory(e.currentTarget.dataset.quoteId);
   });
 
   // ---- NEW QUOTE STEP 1 ----
@@ -3636,6 +3664,38 @@ function attachEvents() {
     navigate('new-quote');
   });
 
+  // Step 2 pane list edit button
+  delegate('[data-edit-pane-step2]', 'click', e => {
+    const idx = parseInt(e.currentTarget.dataset.editPaneStep2);
+    const d = app.draft;
+    d.editingPaneIdx = idx;
+    d.currentPane = JSON.parse(JSON.stringify(d.panes[idx]));
+    d.step = 1;
+    render();
+  });
+
+  // Persistent header nav
+  delegate('[data-nav-home]', 'click', () => {
+    if (app.draft && (app.draft.customerName || app.draft.panes?.length > 0) && !app.draft.isAdminEdit) {
+      if (!confirm('Leave this quote? Unsaved changes will be lost.')) return;
+    }
+    app.draft = null;
+    navigate('home');
+  });
+  delegate('[data-nav-history]', 'click', () => {
+    if (app.draft && (app.draft.customerName || app.draft.panes?.length > 0) && !app.draft.isAdminEdit) {
+      if (!confirm('Leave this quote? Unsaved changes will be lost.')) return;
+    }
+    if (!app.draft?.isAdminEdit) app.draft = null;
+    navigate('history');
+  });
+  delegate('[data-nav-admin]', 'click', () => {
+    navigate('admin');
+  });
+
+  // Tech save from quote-detail
+  on('tech-save-detail', 'click', () => saveAdminEdit());
+
   on('review-tools', 'input', e => { if (app.draft) app.draft.toolsRequired = e.target.value; });
   on('review-notes', 'input', e => { if (app.draft) app.draft.notes = e.target.value; });
 
@@ -3830,7 +3890,7 @@ function finalizeDraft(status) {
 /* ================================================================
    VIEW QUOTE FROM HISTORY (REOPEN)
 ================================================================ */
-function viewQuoteFromHistory(quoteId, isAdminEdit = false) {
+function viewQuoteFromHistory(quoteId) {
   const q = appData.quotes.find(x => x.id === quoteId);
   if (!q) return;
   app.draft = {
@@ -3843,7 +3903,7 @@ function viewQuoteFromHistory(quoteId, isAdminEdit = false) {
     notes: q.notes || '',
     toolsRequired: q.toolsRequired || '',
     supplier: q.supplier || getDefaultSupplier(),
-    panes: JSON.parse(JSON.stringify(q.panes)), // deep clone — prevent draft edits from corrupting saved quote
+    panes: JSON.parse(JSON.stringify(q.panes)),
     currentPane: freshPane(),
     editingPaneIdx: null,
     step: 3,
@@ -3851,9 +3911,9 @@ function viewQuoteFromHistory(quoteId, isAdminEdit = false) {
     status: q.status,
     techId: q.techId,
     techName: q.techName,
-    isAdminEdit: isAdminEdit,
+    isAdminEdit: true,
   };
-  navigate('review');
+  navigate('quote-detail');
 }
 
 /* ================================================================
