@@ -34,7 +34,7 @@ const localStorage = {
 
 const PRICE_CATALOG = {
   version: '2026-07-14',
-  laborRate: 200,
+  laborRates: { 1: 150, 2: 200 },
   sellMultiplier: 3,
   suppliers: {
     busick:    { name: 'Busick',    markup: 1.25,  gridAdder: 5.00  },
@@ -132,7 +132,8 @@ function calcPane(pane, supplier) {
   const glassCost      = SF * (rawRate + gridAdder) * shapeMult * sup.markup;
   const laborHrs       = pane.laborHrs ?? 1.0;
   const crewSize       = isHeavyLift(pane) ? 2 : 1;
-  const laborCost      = laborHrs * crewSize * PRICE_CATALOG.laborRate;
+  const laborRate      = PRICE_CATALOG.laborRates[crewSize];
+  const laborCost      = laborHrs * laborRate;
   const productCost    = +(glassCost * PRICE_CATALOG.sellMultiplier * qty + customGridFlat * qty).toFixed(2);
   const laborTotal     = +(laborCost * qty).toFixed(2);
   const lineTotal      = +(productCost + laborTotal).toFixed(2);
@@ -378,29 +379,29 @@ section('D. Per-pane install time');
 
 test('calcPane uses pane.laborHrs for labor cost (1.0 hr)', () => {
   const r = calcPane(pane({ laborHrs: 1.0 }), 'busick');
-  assert.strictEqual(r.laborCost, 200.00);
+  assert.strictEqual(r.laborCost, 150.00);
 });
 
 test('calcPane uses pane.laborHrs for labor cost (1.5 hr)', () => {
   const r = calcPane(pane({ laborHrs: 1.5 }), 'busick');
-  assert.strictEqual(r.laborCost, 300.00);
+  assert.strictEqual(r.laborCost, 225.00);
 });
 
 test('calcPane uses pane.laborHrs for labor cost (0.25 hr)', () => {
   const r = calcPane(pane({ laborHrs: 0.25 }), 'busick');
-  assert.strictEqual(r.laborCost, 50.00);
+  assert.strictEqual(r.laborCost, 37.50);
 });
 
 test('calcPane defaults to 1.0 hr when laborHrs is missing (backward compat)', () => {
   const oldPane = pane();
   delete oldPane.laborHrs;
   const r = calcPane(oldPane, 'busick');
-  assert.strictEqual(r.laborCost, 200.00);
+  assert.strictEqual(r.laborCost, 150.00);
 });
 
 test('laborHrs scales with qty', () => {
   const r = calcPane(pane({ laborHrs: 1.0, qty: 3 }), 'busick');
-  assert.strictEqual(r.laborCost, 600.00);
+  assert.strictEqual(r.laborCost, 450.00);
 });
 
 test('calcPane accepts no difficulty argument (does not throw)', () => {
@@ -818,11 +819,11 @@ test('standard shape grid adder is NOT doubled', () => {
   );
 });
 
-test('labor cost doubles when crewSize is 2 (same laborHrs)', () => {
+test('2-tech crew rate is $200/hr vs $150/hr for 1-tech (same laborHrs)', () => {
   const light = calcPane(pane({ width: 24, height: 36, thickness: '1/8"', storyLevel: 'ground', laborHrs: 1.0 }), 'busick');
   const heavy = calcPane(pane({ width: 60, height: 60, thickness: '1/4"', storyLevel: 'ground', laborHrs: 1.0 }), 'busick');
-  assert.strictEqual(light.laborCost, 200);
-  assert.strictEqual(heavy.laborCost, 400);
+  assert.strictEqual(light.laborCost, 150);
+  assert.strictEqual(heavy.laborCost, 200);
 });
 
 test('freshPane includes storyLevel defaulting to "ground"', () => {

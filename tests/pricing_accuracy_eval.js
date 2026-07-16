@@ -6,7 +6,7 @@
 
 const PRICE_CATALOG = {
   version: '2026-07-14',
-  laborRate: 200,
+  laborRates: { 1: 150, 2: 200 },
   sellMultiplier: 3,
   suppliers: {
     busick:    { name: 'Busick',    markup: 1.25,  gridAdder: 5.00 },
@@ -83,7 +83,8 @@ function calcPane(pane, supplier) {
   const glassCost      = SF * (rawRate + gridAdder) * shapeMult * sup.markup;
   const laborHrs       = pane.laborHrs ?? 1.0;
   const crewSize       = isHeavyLift(pane) ? 2 : 1;
-  const laborCost      = laborHrs * crewSize * PRICE_CATALOG.laborRate;
+  const laborRate      = PRICE_CATALOG.laborRates[crewSize];
+  const laborCost      = laborHrs * laborRate;
   const productCost    = +(glassCost * PRICE_CATALOG.sellMultiplier * qty + customGridFlat * qty).toFixed(2);
   const laborTotal     = +(laborCost * qty).toFixed(2);
   const lineTotal      = +(productCost + laborTotal).toFixed(2);
@@ -108,48 +109,48 @@ const JOBS = [
   {
     estNum: '26626', jobNum: '1972', targetK: 599.00,
     desc: '35¼×42⅝ Clear Ann IG',
-    notes: '7/8" OA → 1/8" lite; 1 tech × 1hr',
-    panes: [{ width: 36, height: 43, thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'none', shape: 'standard', qty: 1, laborHrs: 1.0, unit: 'in' }],
+    notes: '7/8" OA → 1/8" lite; 1-tech; 0.75 crew-hr (median of 0.5–1 hr range)',
+    panes: [{ width: 36, height: 43, thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'none', shape: 'standard', qty: 1, laborHrs: 0.75, storyLevel: 'ground', unit: 'in' }],
   },
   {
     estNum: '26661', jobNum: '1988', targetK: 550.00,
     desc: '25×15 + 20×25 Triple Pane Clear Ann',
-    notes: 'No OA given → 1/8" default; triple_pane 1.75×; labor split 0.75hr/pane (total 1.5hr); 1 tech',
+    notes: 'No OA given → 1/8" default; triple_pane 1.75×; 1-tech; 0.625 crew-hr/pane (median of 0.5–0.75 hr range)',
     panes: [
-      { width: 25, height: 15, thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'none', shape: 'triple_pane', qty: 1, laborHrs: 0.75, unit: 'in' },
-      { width: 20, height: 25, thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'none', shape: 'triple_pane', qty: 1, laborHrs: 0.75, unit: 'in' },
+      { width: 25, height: 15, thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'none', shape: 'triple_pane', qty: 1, laborHrs: 0.625, storyLevel: 'ground', unit: 'in' },
+      { width: 20, height: 25, thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'none', shape: 'triple_pane', qty: 1, laborHrs: 0.625, storyLevel: 'ground', unit: 'in' },
     ],
   },
   {
     estNum: '26559', jobNum: '1995', targetK: 1549.00,
     desc: '60×59 Grey Temp',
-    notes: '1" OA → 1/4" lite; "grey" → obscured (no rate → requiresQuote); proxy shown with clear_temp; 2 techs × 1.5hr = 3.0 laborHrs',
-    panes: [{ width: 60, height: 59, thickness: '1/4"', coating: 'obscured', finish: 'tempered', grid: 'none', shape: 'standard', qty: 1, laborHrs: 3.0, unit: 'in' }],
-    proxy: [{ width: 60, height: 59, thickness: '1/4"', coating: 'clear', finish: 'tempered', grid: 'none', shape: 'standard', qty: 1, laborHrs: 3.0, unit: 'in' }],
+    notes: '1" OA → 1/4" lite; "grey" → obscured (no rate → requiresQuote); proxy shown with clear_temp; 160 lbs → 2-tech auto; 1.25 crew-hr (median of 1–1.5 hr range)',
+    panes: [{ width: 60, height: 59, thickness: '1/4"', coating: 'obscured', finish: 'tempered', grid: 'none', shape: 'standard', qty: 1, laborHrs: 1.25, storyLevel: 'ground', unit: 'in' }],
+    proxy: [{ width: 60, height: 59, thickness: '1/4"', coating: 'clear', finish: 'tempered', grid: 'none', shape: 'standard', qty: 1, laborHrs: 1.25, storyLevel: 'ground', unit: 'in' }],
   },
   {
     estNum: '26564', jobNum: '1930', targetK: 699.00,
     desc: '34×58 Double-Coat Low-E Ann Grid',
-    notes: '15/16" OA → 1/8" lite (15/16" = two 1/8" lites + spacer); c270 ann confirmed; standard grid; 1 tech × 1.5hr. NOTE: even with correct thickness, product cost alone (~$617) nearly equals target ($699) leaving no room for labor at list price — suspected below-list sale.',
-    panes: [{ width: 34, height: 58, thickness: '1/8"', coating: 'c270', finish: 'annealed', grid: 'standard', shape: 'standard', qty: 1, laborHrs: 1.5, unit: 'in' }],
+    notes: '15/16" OA → 1/8" lite (15/16" = two 1/8" lites + spacer); c270 ann confirmed; standard grid; 1-tech; 1.25 crew-hr (median of 1–1.5 hr range). NOTE: product cost alone (~$617) nearly equals target ($699) — suspected below-list sale.',
+    panes: [{ width: 34, height: 58, thickness: '1/8"', coating: 'c270', finish: 'annealed', grid: 'standard', shape: 'standard', qty: 1, laborHrs: 1.25, storyLevel: 'ground', unit: 'in' }],
   },
   {
     estNum: '26585', jobNum: '1948', targetK: 549.00,
     desc: '38×41 Clear Ann IG',
-    notes: 'No OA given → 1/8" default; rescreen excluded; 1 tech × 1.5hr',
-    panes: [{ width: 38, height: 41, thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'none', shape: 'standard', qty: 1, laborHrs: 1.5, unit: 'in' }],
+    notes: 'No OA given → 1/8" default; rescreen excluded; 1-tech; 1.0 crew-hr (median of 0.5–1.5 hr range)',
+    panes: [{ width: 38, height: 41, thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'none', shape: 'standard', qty: 1, laborHrs: 1.0, storyLevel: 'ground', unit: 'in' }],
   },
   {
     estNum: '26584', jobNum: '1947', targetK: 979.00,
     desc: '40×58 Clear Temp Grid',
-    notes: 'No OA given → 1/8" default; standard grid; 2 techs × 1hr = 2.0 laborHrs',
-    panes: [{ width: 40, height: 58, thickness: '1/8"', coating: 'clear', finish: 'tempered', grid: 'standard', shape: 'standard', qty: 1, laborHrs: 2.0, unit: 'in' }],
+    notes: 'No OA given → 1/8" default; standard grid; 1-tech (52.8 lbs, ground); 0.75 crew-hr (median of 0.5–1 hr range)',
+    panes: [{ width: 40, height: 58, thickness: '1/8"', coating: 'clear', finish: 'tempered', grid: 'standard', shape: 'standard', qty: 1, laborHrs: 0.75, storyLevel: 'ground', unit: 'in' }],
   },
   {
     estNum: '26507', jobNum: '1917', targetK: 789.00,
     desc: '11×53 Hardcoat Ann Grid Triple Pane',
-    notes: 'No OA given → 1/8" default; hardcoat → c270 rate; triple_pane 1.75×; standard grid; finish=Ann (N→default); 1 tech × 1hr',
-    panes: [{ width: 11, height: 53, thickness: '1/8"', coating: 'hardcoat', finish: 'annealed', grid: 'standard', shape: 'triple_pane', qty: 1, laborHrs: 1.0, unit: 'in' }],
+    notes: 'No OA given → 1/8" default; hardcoat → c270 rate; triple_pane 1.75×; standard grid; finish=Ann (N→default); 1-tech; 0.75 crew-hr (median of 0.5–1 hr range)',
+    panes: [{ width: 11, height: 53, thickness: '1/8"', coating: 'hardcoat', finish: 'annealed', grid: 'standard', shape: 'triple_pane', qty: 1, laborHrs: 0.75, storyLevel: 'ground', unit: 'in' }],
   },
 ];
 

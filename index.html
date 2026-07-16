@@ -1163,12 +1163,13 @@ const MAX_PANE_SIZE_IN = 120; // inches — trigger large-pane warning
 
 // FastGlass pricing engine — sourced from COST CALCULATOR 2.27.2026 (CURRENT).xlsx
 // Formula: sellPrice = SF × (rawRate + gridAdder) × shapeMult × 3 + laborHrs × laborRate
+// laborRates: 1-tech = $150/hr crew, 2-tech = $200/hr crew (crew hours, not per-person)
 // Supplier markup is NOT applied separately — rawRates are supplier invoice prices and the 3× sell
 // multiplier already captures the full margin. Applying markup × 3 was double-charging.
 // null = requires custom quote (not in supplier price sheet)
 const PRICE_CATALOG = {
   version: '2026-07-14',
-  laborRate: 200,
+  laborRates: { 1: 150, 2: 200 },  // crew-hour rates: 1-tech=$150/hr, 2-tech=$200/hr
   sellMultiplier: 3,         // sell = companyCost × 3 (per COST CALCULATOR 2.27.2026)
   suppliers: {
     busick:    { name: 'Busick',    markup: 1.25,  gridAdder: 5.00  },
@@ -1374,7 +1375,8 @@ let appConfig = {
 
 /* ================================================================
    PRICING ENGINE
-   Formula: sellPrice = SF × (rawRate + gridAdder) × shapeMult × 3 + laborHrs × $200
+   Formula: sellPrice = SF × (rawRate + gridAdder) × shapeMult × 3 + laborHrs × laborRate
+   laborRate: 1-tech=$150/hr, 2-tech=$200/hr crew hour
    Supplier markup is NOT applied separately — rawRates are supplier invoice prices,
    3× sell multiplier captures full margin. Verified against COST CALCULATOR 2.27.2026.
 ================================================================ */
@@ -1403,7 +1405,8 @@ function calcPane(pane, supplier) {
   const glassCost      = SF * (rawRate + gridAdder) * shapeMult * sup.markup;
   const laborHrs       = pane.laborHrs ?? 1.0;
   const crewSize       = isHeavyLift(pane) ? 2 : 1;
-  const laborCost      = laborHrs * crewSize * PRICE_CATALOG.laborRate;
+  const laborRate      = PRICE_CATALOG.laborRates[crewSize];
+  const laborCost      = laborHrs * laborRate;
   const productCost    = +(glassCost * PRICE_CATALOG.sellMultiplier * qty + customGridFlat * qty).toFixed(2);
   const laborTotal     = +(laborCost * qty).toFixed(2);
   const lineTotal      = +(productCost + laborTotal).toFixed(2);
@@ -2193,10 +2196,10 @@ function renderNewQuoteStep1() {
 
         // ── Install Time ────────────────────────────────────────────
         const laborHrs   = cp.laborHrs || 1.0;
-        const billedHrs  = heavy ? laborHrs * 2 : laborHrs;
-        const flagLabel  = heavy ? ` <span style="font-size:11px;font-weight:700;color:var(--orange);letter-spacing:0.5px;text-transform:uppercase;">· 2-Tech · Labor ×2</span>` : '';
+        const crewRate   = heavy ? PRICE_CATALOG.laborRates[2] : PRICE_CATALOG.laborRates[1];
+        const flagLabel  = heavy ? ` <span style="font-size:11px;font-weight:700;color:var(--orange);letter-spacing:0.5px;text-transform:uppercase;">· 2-Tech · $${PRICE_CATALOG.laborRates[2]}/hr</span>` : '';
         const billedLine = heavy ? `
-      <div style="margin-top:6px;font-size:13px;color:var(--text-2);">Billed as ${billedHrs.toFixed(1)} hr&ensp;<span style="color:var(--text-3);">(2 techs × ${laborHrs.toFixed(2)} hr)</span></div>` : '';
+      <div style="margin-top:6px;font-size:13px;color:var(--text-2);">2-tech crew rate · <span style="color:var(--text-1);font-weight:600;">$${PRICE_CATALOG.laborRates[2]}/hr</span><span style="color:var(--text-3);"> vs. $${PRICE_CATALOG.laborRates[1]}/hr for 1-tech</span></div>` : '';
 
         return `${weightSection}${floorSection}
       <div class="section-label mb-8">Install Time${flagLabel}</div>
@@ -2223,7 +2226,7 @@ function renderNewQuoteStep1() {
         <span class="price-row-value">${fmt(paneCalc.productCost)}</span>
       </div>
       <div class="price-row">
-        <span class="price-row-label">Labor (${(cp.laborHrs||1.0).toFixed(2)} hr${paneCalc.crewSize>1?' × 2 techs':''})</span>
+        <span class="price-row-label">Labor (${(cp.laborHrs||1.0).toFixed(2)} hr${paneCalc.crewSize>1?' · 2-tech crew':''})</span>
         <span class="price-row-value">${fmt(paneCalc.laborCost)}</span>
       </div>
       <div class="price-total-row">
@@ -2403,7 +2406,7 @@ function renderReview() {
           <span class="price-row-label" style="font-size:13px;">Glass / Product${pGridMode!=='none'?' (incl. grid)':''}${p.shape&&p.shape!=='standard'?' · '+p.shape.replace(/_/g,' '):''}</span>
           <span class="price-row-value" style="font-size:15px;">${r&&!r.requiresQuote?fmt(r.productCost):'QUOTE'}</span>
         </div>
-        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Labor (${(p.laborHrs??1.0).toFixed(2)} hr${r&&!r.requiresQuote&&r.crewSize>1?' × 2 techs':''})</span><span class="price-row-value" style="font-size:15px;">${r&&!r.requiresQuote?fmt(r.laborCost):'—'}</span></div>
+        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Labor (${(p.laborHrs??1.0).toFixed(2)} hr${r&&!r.requiresQuote&&r.crewSize>1?' · 2-tech crew':''})</span><span class="price-row-value" style="font-size:15px;">${r&&!r.requiresQuote?fmt(r.laborCost):'—'}</span></div>
       </div>`;
     }).join('')}
 
@@ -2717,7 +2720,7 @@ function renderAdminGlassTypes() {
 }
 
 function renderAdminLabor() {
-  const laborRate      = PRICE_CATALOG.laborRate;
+  const laborRates     = PRICE_CATALOG.laborRates;
   const defaultSupplier = appConfig.default_supplier || 'busick';
   const rangeBand      = String(appConfig.range_band ?? 0.08);
   const SUPPLIER_OPTS  = Object.entries(PRICE_CATALOG.suppliers).map(([id,s])=>({id, name:s.name}));
@@ -2729,11 +2732,20 @@ function renderAdminLabor() {
   ];
   return `
 <div>
-  <div class="section-label mb-12">Labor Rate</div>
+  <div class="section-label mb-12">Labor Rates</div>
   <div class="card mb-16">
-    <div style="font-size:14px;color:var(--text-2);">Hourly labor rate</div>
-    <div style="font-family:var(--font-title);font-weight:800;font-size:28px;color:var(--amber);">$${laborRate}/hr</div>
-    <div style="font-size:12px;color:var(--text-3);margin-top:4px;">Set per-pane by the tech in the field. Update in PRICE_CATALOG.laborRate in source code.</div>
+    <div style="display:flex;gap:24px;">
+      <div>
+        <div style="font-size:12px;color:var(--text-2);margin-bottom:2px;">1-Tech Crew</div>
+        <div style="font-family:var(--font-title);font-weight:800;font-size:28px;color:var(--amber);">$${laborRates[1]}/hr</div>
+      </div>
+      <div style="width:1px;background:var(--border-0);"></div>
+      <div>
+        <div style="font-size:12px;color:var(--text-2);margin-bottom:2px;">2-Tech Crew</div>
+        <div style="font-family:var(--font-title);font-weight:800;font-size:28px;color:var(--amber);">$${laborRates[2]}/hr</div>
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--text-3);margin-top:8px;">Crew-hour rates (not per-person). Update in PRICE_CATALOG.laborRates in source code.</div>
   </div>
 
   <div class="section-label mb-8">Default Supplier</div>
@@ -2771,7 +2783,8 @@ function renderAdminMaterials() {
     <div style="font-size:13px;color:var(--text-2);line-height:2.0;font-family:monospace;">
       <div>SF = (width × height) / 144</div>
       <div>glassCost = SF × (rawRate + gridAdder) × shapeMult × supplierMarkup</div>
-      <div>paneTotal = glassCost × ${PRICE_CATALOG.sellMultiplier} + laborHrs × $${PRICE_CATALOG.laborRate}</div>
+      <div>paneTotal = glassCost × ${PRICE_CATALOG.sellMultiplier} + laborHrs × laborRate</div>
+      <div>laborRate = $${PRICE_CATALOG.laborRates[1]}/hr (1-tech) or $${PRICE_CATALOG.laborRates[2]}/hr (2-tech crew)</div>
       <div>range = paneTotal × (1 ± band), floor $400</div>
     </div>
   </div>
@@ -2892,7 +2905,7 @@ function renderQuoteDetail() {
         </div>
         <div class="divider-dashed"></div>
         <div class="price-row"><span class="price-row-label" style="font-size:13px;">Glass / Product</span><span class="price-row-value" style="font-size:14px;">${r && !r.requiresQuote ? fmt(r.productCost) : 'QUOTE'}</span></div>
-        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Labor (${(p.laborHrs ?? 1.0).toFixed(2)} hr${r && !r.requiresQuote && r.crewSize > 1 ? ' × 2 techs' : ''})</span><span class="price-row-value" style="font-size:14px;">${r && !r.requiresQuote ? fmt(r.laborCost) : '—'}</span></div>
+        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Labor (${(p.laborHrs ?? 1.0).toFixed(2)} hr${r && !r.requiresQuote && r.crewSize > 1 ? ' · 2-tech crew' : ''})</span><span class="price-row-value" style="font-size:14px;">${r && !r.requiresQuote ? fmt(r.laborCost) : '—'}</span></div>
         <div class="price-row" style="margin-top:4px;">
           <span class="price-row-label" style="font-size:13px;font-weight:600;color:var(--text-1);">Pane Estimate</span>
           <span class="price-row-value" style="font-size:15px;color:var(--amber);font-weight:700;">${r && !r.requiresQuote ? fmtRange(r.lineTotal) : '—'}</span>
