@@ -58,6 +58,23 @@ const PRICE_CATALOG = {
       '1/4"':  { clear_ann: 8.04, clear_temp:  9.50, c180_ann: 13.94, c180_temp: 16.18, c270_ann: 10.51, c270_temp: 12.54, c360_ann: 12.25, c360_temp: 14.25 },
     },
   },
+  looseLiteRates: {
+    busick: {
+      '1/8"':  { clear_ann: null,  clear_temp: 6.27, tint_ann: 8.72,  hardcoat_ann: 13.92, obscured_ann: 10.22, grey_ann: 14.47, grey_temp: null  },
+      '3/16"': { clear_ann: null,  clear_temp: 6.74, tint_ann: 9.37,  hardcoat_ann: 14.58, obscured_ann: 14.35, grey_ann: null,  grey_temp: null  },
+      '1/4"':  { clear_ann: null,  clear_temp: 6.74, tint_ann: 9.33,  hardcoat_ann: 14.58, obscured_ann: null,  grey_ann: 19.01, grey_temp: null  },
+    },
+    glaz_tech: {
+      '1/8"':  { clear_ann: 3.96,  clear_temp: 5.38, tint_ann: 7.30,  hardcoat_ann: 11.95, obscured_ann: 8.77,  grey_ann: 20.28, grey_temp: null  },
+      '3/16"': { clear_ann: 5.64,  clear_temp: 5.38, tint_ann: 7.68,  hardcoat_ann: null,  obscured_ann: 12.37, grey_ann: null,  grey_temp: null  },
+      '1/4"':  { clear_ann: 5.71,  clear_temp: 6.54, tint_ann: 8.18,  hardcoat_ann: 9.97,  obscured_ann: null,  grey_ann: null,  grey_temp: null  },
+    },
+    oldcastle: {
+      '1/8"':  { clear_ann: 3.33,  clear_temp: 4.45, tint_ann: 5.99,  hardcoat_ann: null,  obscured_ann: null,  grey_ann: 12.88, grey_temp: 14.00 },
+      '3/16"': { clear_ann: 3.80,  clear_temp: 3.80, tint_ann: null,  hardcoat_ann: null,  obscured_ann: 11.59, grey_ann: null,  grey_temp: null  },
+      '1/4"':  { clear_ann: 5.95,  clear_temp: 7.40, tint_ann: null,  hardcoat_ann: null,  obscured_ann: null,  grey_ann: null,  grey_temp: null  },
+    },
+  },
   shapeMultipliers: {
     standard:      1.00,
     single_slope:  1.30,
@@ -67,12 +84,11 @@ const PRICE_CATALOG = {
     parallelogram: 2.00,
     circle:        2.00,
     octagon:       2.00,
-    triple_pane:   1.75,
   },
   glassWeights: {
-    '1/8"':  3.28,
-    '3/16"': 4.90,
-    '1/4"':  6.54,
+    sp: { '1/8"': 1.64, '3/16"': 2.45, '1/4"': 3.27 },
+    ig: { '1/8"': 3.28, '3/16"': 4.90, '1/4"': 6.54 },
+    tp: { '1/8"': 4.92, '3/16"': 7.35, '1/4"': 9.81 },
   },
   weightThresholds: {
     heavy:    75,
@@ -82,7 +98,9 @@ const PRICE_CATALOG = {
 
 function calcPaneWeight(pane) {
   if (!pane.width || !pane.height || !pane.thickness) return null;
-  const lbsPerSF = PRICE_CATALOG.glassWeights[pane.thickness];
+  const ut = pane.unitType || (pane.shape === 'triple_pane' ? 'triple_pane' : 'double_pane');
+  const weightKey = ut === 'single_pane' ? 'sp' : ut === 'triple_pane' ? 'tp' : 'ig';
+  const lbsPerSF = PRICE_CATALOG.glassWeights[weightKey]?.[pane.thickness];
   if (!lbsPerSF) return null;
   return +((pane.width * pane.height) / 144 * lbsPerSF).toFixed(1);
 }
@@ -118,17 +136,28 @@ function calcPane(pane, supplier) {
   const qty       = pane.qty || 1;
   const SF        = (w_in * h_in) / 144;
   const finishKey = pane.finish === 'annealed' ? 'ann' : 'temp';
-  const coatingKey = pane.coating === 'hardcoat' ? 'c180' : pane.coating;
-  const rateKey   = `${coatingKey}_${finishKey}`;
   const sup       = PRICE_CATALOG.suppliers[supplier] || PRICE_CATALOG.suppliers.busick;
-  const rawRate   = PRICE_CATALOG.rates[supplier]?.[pane.thickness]?.[rateKey];
+
+  const unitType = pane.unitType || (pane.shape === 'triple_pane' ? 'triple_pane' : 'double_pane');
+  const isSP = unitType === 'single_pane';
+  const isTP = unitType === 'triple_pane';
+
+  let rawRate;
+  if (isSP) {
+    if (pane.coating === 'other') return { requiresQuote: true };
+    rawRate = PRICE_CATALOG.looseLiteRates[supplier]?.[pane.thickness]?.[`${pane.coating}_${finishKey}`];
+  } else {
+    const coatingKey = pane.coating === 'hardcoat' ? 'c180' : pane.coating;
+    rawRate = PRICE_CATALOG.rates[supplier]?.[pane.thickness]?.[`${coatingKey}_${finishKey}`];
+  }
 
   if (rawRate === null || rawRate === undefined) return { requiresQuote: true };
 
   const gridMode       = pane.grid !== undefined ? pane.grid : (pane.gridEnabled ? 'standard' : 'none');
-  const gridAdder      = gridMode !== 'none' ? sup.gridAdder * (pane.shape === 'triple_pane' ? 2 : 1) : 0;
+  const gridAdder      = gridMode !== 'none' ? sup.gridAdder * (isTP ? 2 : 1) : 0;
   const customGridFlat = gridMode === 'custom' ? 50 : 0;
-  const shapeMult      = PRICE_CATALOG.shapeMultipliers[pane.shape] || 1.0;
+  const baseShapeMult  = PRICE_CATALOG.shapeMultipliers[pane.shape] || 1.0;
+  const shapeMult      = isTP ? baseShapeMult * 1.75 : baseShapeMult;
   const glassCost      = SF * (rawRate + gridAdder) * shapeMult * sup.markup;
   const laborHrs       = pane.laborHrs ?? 1.0;
   const crewSize       = isHeavyLift(pane) ? 2 : 1;
@@ -200,6 +229,7 @@ function freshPane(from) {
     unit:        'in',
     laborHrs:    1.0,
     storyLevel:  'ground',
+    unitType:    'double_pane',
   };
 }
 
@@ -251,6 +281,7 @@ function pane(overrides = {}) {
     finish:      'annealed',
     grid:        'none',
     shape:       'standard',
+    unitType:    'double_pane',
     qty:         1,
     widthWhole:  '24',
     widthFrac:   '',
@@ -324,6 +355,9 @@ test('freshPane has no decimal width or height string', () => {
   const fp = freshPane();
   assert.ok(typeof fp.width  === 'number', 'width should be a number');
   assert.ok(typeof fp.height === 'number', 'height should be a number');
+});
+test('freshPane has unitType defaulting to "double_pane"', () => {
+  assert.strictEqual(freshPane().unitType, 'double_pane');
 });
 
 // ─── C. Grid — 3-option chip ─────────────────────────────────────────────────
@@ -532,8 +566,8 @@ test('circle shape multiplier is 2.0', () => {
   assert.strictEqual(PRICE_CATALOG.shapeMultipliers.circle, 2.00);
 });
 
-test('triple_pane shape multiplier is 1.75', () => {
-  assert.strictEqual(PRICE_CATALOG.shapeMultipliers.triple_pane, 1.75);
+test('triple_pane is NOT in shapeMultipliers (handled via unitType)', () => {
+  assert.strictEqual('triple_pane' in PRICE_CATALOG.shapeMultipliers, false);
 });
 
 test('non-standard shape multiplier is applied to product cost', () => {
@@ -795,12 +829,13 @@ test('crewSize is 2 for 50–74 lb pane on upper floor', () => {
 });
 
 test('triple pane + grid doubles the grid adder (2 air spaces)', () => {
-  const withGrid    = calcPane(pane({ shape: 'triple_pane', grid: 'standard', width: 24, height: 36 }), 'busick');
-  const withoutGrid = calcPane(pane({ shape: 'triple_pane', grid: 'none',     width: 24, height: 36 }), 'busick');
+  const withGrid    = calcPane(pane({ unitType: 'triple_pane', grid: 'standard', width: 24, height: 36 }), 'busick');
+  const withoutGrid = calcPane(pane({ unitType: 'triple_pane', grid: 'none',     width: 24, height: 36 }), 'busick');
   const SF = (24 * 36) / 144;
   const sup = PRICE_CATALOG.suppliers.busick;
-  // grid cost = SF × (gridAdder × 2) × shapeMult × markup × 3
-  const expectedGridDiff = +(SF * (sup.gridAdder * 2) * PRICE_CATALOG.shapeMultipliers.triple_pane * sup.markup * PRICE_CATALOG.sellMultiplier).toFixed(2);
+  // TP shapeMult = standard(1.0) × 1.75; grid adder is doubled for TP (2 air spaces)
+  const tpShapeMult = 1.0 * 1.75;
+  const expectedGridDiff = +(SF * (sup.gridAdder * 2) * tpShapeMult * sup.markup * PRICE_CATALOG.sellMultiplier).toFixed(2);
   assert.ok(
     Math.abs((withGrid.productCost - withoutGrid.productCost) - expectedGridDiff) < 0.01,
     `Triple pane grid diff should be ${expectedGridDiff}, got ${(withGrid.productCost - withoutGrid.productCost).toFixed(2)}`
@@ -833,6 +868,85 @@ test('freshPane includes storyLevel defaulting to "ground"', () => {
 test('weight is included in calcPane result', () => {
   const r = calcPane(pane({ width: 24, height: 36, thickness: '1/8"' }), 'busick');
   assert.ok(typeof r.weight === 'number', `weight should be a number, got ${typeof r.weight}`);
+});
+
+// ─── N. Unit Type — single pane, double pane, triple pane ────────────────────
+
+section('N. Unit type selector');
+
+test('freshPane unitType defaults to "double_pane"', () => {
+  assert.strictEqual(freshPane().unitType, 'double_pane');
+});
+
+test('SP uses looseLiteRates (not IG rates)', () => {
+  // Glaz-Tech 1/8" clear_ann SP = 3.96 $/SF
+  const r = calcPane(pane({ unitType: 'single_pane', coating: 'clear', finish: 'annealed', thickness: '1/8"', width: 24, height: 36 }), 'glaz_tech');
+  const SF = (24 * 36) / 144;
+  const sup = PRICE_CATALOG.suppliers.glaz_tech;
+  const expected = +(SF * 3.96 * sup.markup * PRICE_CATALOG.sellMultiplier).toFixed(2);
+  assert.ok(!r.requiresQuote, 'SP clear ann glaz_tech should price successfully');
+  assert.ok(Math.abs(r.productCost - expected) < 0.01, `Expected ${expected}, got ${r.productCost}`);
+});
+
+test('SP hardcoat uses hardcoat_ann key directly (no c180 alias)', () => {
+  // Glaz-Tech 1/8" hardcoat_ann SP = 11.95 $/SF
+  const sp = calcPane(pane({ unitType: 'single_pane',  coating: 'hardcoat', finish: 'annealed', thickness: '1/8"' }), 'glaz_tech');
+  const ig = calcPane(pane({ unitType: 'double_pane',  coating: 'hardcoat', finish: 'annealed', thickness: '1/8"' }), 'glaz_tech');
+  assert.ok(!sp.requiresQuote, 'SP hardcoat should price');
+  assert.notStrictEqual(sp.productCost, ig.productCost, 'SP and IG hardcoat use different rate tables');
+});
+
+test('SP coating "other" returns requiresQuote', () => {
+  const r = calcPane(pane({ unitType: 'single_pane', coating: 'other', finish: 'annealed', thickness: '1/8"' }), 'busick');
+  assert.ok(r && r.requiresQuote === true, 'SP other should require a quote');
+});
+
+test('SP null rate (missing from looseLiteRates) returns requiresQuote', () => {
+  // Busick 1/8" clear_ann SP = null
+  const r = calcPane(pane({ unitType: 'single_pane', coating: 'clear', finish: 'annealed', thickness: '1/8"' }), 'busick');
+  assert.ok(r && r.requiresQuote === true, 'Busick SP 1/8" clear_ann is null → requires quote');
+});
+
+test('TP applies 1.75× shape multiplier to product cost', () => {
+  const dp = calcPane(pane({ unitType: 'double_pane', coating: 'clear', finish: 'annealed', grid: 'none' }), 'busick');
+  const tp = calcPane(pane({ unitType: 'triple_pane', coating: 'clear', finish: 'annealed', grid: 'none' }), 'busick');
+  assert.ok(!dp.requiresQuote && !tp.requiresQuote, 'Both should price');
+  const ratio = tp.productCost / dp.productCost;
+  assert.ok(Math.abs(ratio - 1.75) < 0.01, `TP/DP product cost ratio should be 1.75, got ${ratio.toFixed(4)}`);
+});
+
+test('backward compat: shape=triple_pane with no unitType prices as TP (1.75×)', () => {
+  const legacyPane = pane({ shape: 'triple_pane', coating: 'clear', finish: 'annealed', grid: 'none' });
+  delete legacyPane.unitType; // simulate old Supabase pane with no unitType column
+  const legacy   = calcPane(legacyPane, 'busick');
+  const explicit = calcPane(pane({ unitType: 'triple_pane', coating: 'clear', finish: 'annealed', grid: 'none' }), 'busick');
+  assert.ok(!legacy.requiresQuote, 'legacy triple_pane shape should price');
+  assert.strictEqual(legacy.productCost, explicit.productCost, 'legacy shape=triple_pane should match unitType=triple_pane');
+});
+
+test('calcPaneWeight SP returns lower weight than IG (half the glass)', () => {
+  const sp = calcPaneWeight({ width: 24, height: 36, thickness: '1/8"', unitType: 'single_pane' });
+  const ig = calcPaneWeight({ width: 24, height: 36, thickness: '1/8"', unitType: 'double_pane' });
+  assert.ok(sp < ig, `SP weight (${sp}) should be less than IG weight (${ig})`);
+  // SP 1/8" = 1.64 lbs/SF; IG 1/8" = 3.28 lbs/SF → exactly half
+  assert.ok(Math.abs(sp / ig - 0.5) < 0.01, `SP should be exactly half IG weight`);
+});
+
+test('calcPaneWeight TP returns greater weight than IG', () => {
+  const ig = calcPaneWeight({ width: 24, height: 36, thickness: '1/8"', unitType: 'double_pane' });
+  const tp = calcPaneWeight({ width: 24, height: 36, thickness: '1/8"', unitType: 'triple_pane' });
+  assert.ok(tp > ig, `TP weight (${tp}) should exceed IG weight (${ig})`);
+});
+
+test('TP grid adder doubles vs DP for same pane', () => {
+  const dpGrid = calcPane(pane({ unitType: 'double_pane', grid: 'standard', width: 24, height: 36 }), 'busick');
+  const dpNone = calcPane(pane({ unitType: 'double_pane', grid: 'none',     width: 24, height: 36 }), 'busick');
+  const tpGrid = calcPane(pane({ unitType: 'triple_pane', coating: 'clear', finish: 'annealed', grid: 'standard', width: 24, height: 36 }), 'busick');
+  const tpNone = calcPane(pane({ unitType: 'triple_pane', coating: 'clear', finish: 'annealed', grid: 'none',     width: 24, height: 36 }), 'busick');
+  // TP grid contribution is roughly 2× DP grid contribution (same shapeMult ratio holds for grid adder)
+  const dpGridCost = dpGrid.productCost - dpNone.productCost;
+  const tpGridCost = tpGrid.productCost - tpNone.productCost;
+  assert.ok(tpGridCost > dpGridCost, `TP grid cost (${tpGridCost}) should exceed DP grid cost (${dpGridCost})`);
 });
 
 // ─── Summary ─────────────────────────────────────────────────────────────────

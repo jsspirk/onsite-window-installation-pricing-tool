@@ -30,15 +30,32 @@ const PRICE_CATALOG = {
       '1/4"':  { clear_ann: 8.04, clear_temp:  9.50, c180_ann: 13.94, c180_temp: 16.18, c270_ann: 10.51, c270_temp: 12.54, c360_ann: 12.25, c360_temp: 14.25 },
     },
   },
+  looseLiteRates: {
+    busick: {
+      '1/8"':  { clear_ann: null,  clear_temp: 6.27, tint_ann: 8.72,  hardcoat_ann: 13.92, obscured_ann: 10.22, grey_ann: 14.47, grey_temp: null  },
+      '3/16"': { clear_ann: null,  clear_temp: 6.74, tint_ann: 9.37,  hardcoat_ann: 14.58, obscured_ann: 14.35, grey_ann: null,  grey_temp: null  },
+      '1/4"':  { clear_ann: null,  clear_temp: 6.74, tint_ann: 9.33,  hardcoat_ann: 14.58, obscured_ann: null,  grey_ann: 19.01, grey_temp: null  },
+    },
+    glaz_tech: {
+      '1/8"':  { clear_ann: 3.96,  clear_temp: 5.38, tint_ann: 7.30,  hardcoat_ann: 11.95, obscured_ann: 8.77,  grey_ann: 20.28, grey_temp: null  },
+      '3/16"': { clear_ann: 5.64,  clear_temp: 5.38, tint_ann: 7.68,  hardcoat_ann: null,  obscured_ann: 12.37, grey_ann: null,  grey_temp: null  },
+      '1/4"':  { clear_ann: 5.71,  clear_temp: 6.54, tint_ann: 8.18,  hardcoat_ann: 9.97,  obscured_ann: null,  grey_ann: null,  grey_temp: null  },
+    },
+    oldcastle: {
+      '1/8"':  { clear_ann: 3.33,  clear_temp: 4.45, tint_ann: 5.99,  hardcoat_ann: null,  obscured_ann: null,  grey_ann: 12.88, grey_temp: 14.00 },
+      '3/16"': { clear_ann: 3.80,  clear_temp: 3.80, tint_ann: null,  hardcoat_ann: null,  obscured_ann: 11.59, grey_ann: null,  grey_temp: null  },
+      '1/4"':  { clear_ann: 5.95,  clear_temp: 7.40, tint_ann: null,  hardcoat_ann: null,  obscured_ann: null,  grey_ann: null,  grey_temp: null  },
+    },
+  },
   shapeMultipliers: {
     standard: 1.00, single_slope: 1.30, double_slope: 1.40,
     radius: 1.50, patterns: 1.50, parallelogram: 2.00,
-    circle: 2.00, octagon: 2.00, triple_pane: 1.75,
+    circle: 2.00, octagon: 2.00,
   },
   glassWeights: {
-    '1/8"':  3.28,
-    '3/16"': 4.90,
-    '1/4"':  6.54,
+    sp: { '1/8"': 1.64, '3/16"': 2.45, '1/4"': 3.27 },
+    ig: { '1/8"': 3.28, '3/16"': 4.90, '1/4"': 6.54 },
+    tp: { '1/8"': 4.92, '3/16"': 7.35, '1/4"': 9.81 },
   },
   weightThresholds: {
     heavy:    75,
@@ -48,7 +65,9 @@ const PRICE_CATALOG = {
 
 function calcPaneWeight(pane) {
   if (!pane.width || !pane.height || !pane.thickness) return null;
-  const lbsPerSF = PRICE_CATALOG.glassWeights[pane.thickness];
+  const ut = pane.unitType || (pane.shape === 'triple_pane' ? 'triple_pane' : 'double_pane');
+  const weightKey = ut === 'single_pane' ? 'sp' : ut === 'triple_pane' ? 'tp' : 'ig';
+  const lbsPerSF = PRICE_CATALOG.glassWeights[weightKey]?.[pane.thickness];
   if (!lbsPerSF) return null;
   return +((pane.width * pane.height) / 144 * lbsPerSF).toFixed(1);
 }
@@ -66,20 +85,31 @@ function calcPane(pane, supplier) {
   if (!w_in || !h_in || w_in <= 0 || h_in <= 0) return null;
   if (!pane.thickness || !pane.coating || !pane.finish) return null;
 
-  const qty        = pane.qty || 1;
-  const SF         = (w_in * h_in) / 144;
-  const finishKey  = pane.finish === 'annealed' ? 'ann' : 'temp';
-  const coatingKey = pane.coating === 'hardcoat' ? 'c180' : pane.coating;
-  const rateKey    = `${coatingKey}_${finishKey}`;
-  const sup        = PRICE_CATALOG.suppliers[supplier] || PRICE_CATALOG.suppliers.busick;
-  const rawRate    = PRICE_CATALOG.rates[supplier]?.[pane.thickness]?.[rateKey];
+  const qty       = pane.qty || 1;
+  const SF        = (w_in * h_in) / 144;
+  const finishKey = pane.finish === 'annealed' ? 'ann' : 'temp';
+  const sup       = PRICE_CATALOG.suppliers[supplier] || PRICE_CATALOG.suppliers.busick;
+
+  const unitType = pane.unitType || (pane.shape === 'triple_pane' ? 'triple_pane' : 'double_pane');
+  const isSP = unitType === 'single_pane';
+  const isTP = unitType === 'triple_pane';
+
+  let rawRate;
+  if (isSP) {
+    if (pane.coating === 'other') return { requiresQuote: true };
+    rawRate = PRICE_CATALOG.looseLiteRates[supplier]?.[pane.thickness]?.[`${pane.coating}_${finishKey}`];
+  } else {
+    const coatingKey = pane.coating === 'hardcoat' ? 'c180' : pane.coating;
+    rawRate = PRICE_CATALOG.rates[supplier]?.[pane.thickness]?.[`${coatingKey}_${finishKey}`];
+  }
 
   if (rawRate === null || rawRate === undefined) return { requiresQuote: true };
 
   const gridMode       = pane.grid !== undefined ? pane.grid : (pane.gridEnabled ? 'standard' : 'none');
-  const gridAdder      = gridMode !== 'none' ? sup.gridAdder * (pane.shape === 'triple_pane' ? 2 : 1) : 0;
+  const gridAdder      = gridMode !== 'none' ? sup.gridAdder * (isTP ? 2 : 1) : 0;
   const customGridFlat = gridMode === 'custom' ? 50 : 0;
-  const shapeMult      = PRICE_CATALOG.shapeMultipliers[pane.shape] || 1.0;
+  const baseShapeMult  = PRICE_CATALOG.shapeMultipliers[pane.shape] || 1.0;
+  const shapeMult      = isTP ? baseShapeMult * 1.75 : baseShapeMult;
   const glassCost      = SF * (rawRate + gridAdder) * shapeMult * sup.markup;
   const laborHrs       = pane.laborHrs ?? 1.0;
   const crewSize       = isHeavyLift(pane) ? 2 : 1;
@@ -110,47 +140,47 @@ const JOBS = [
     estNum: '26626', jobNum: '1972', targetK: 599.00,
     desc: '35¼×42⅝ Clear Ann IG',
     notes: '7/8" OA → 1/8" lite; 1-tech; 0.75 crew-hr (median of 0.5–1 hr range)',
-    panes: [{ width: 36, height: 43, thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'none', shape: 'standard', qty: 1, laborHrs: 0.75, storyLevel: 'ground', unit: 'in' }],
+    panes: [{ width: 36, height: 43, thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'none', shape: 'standard', unitType: 'double_pane', qty: 1, laborHrs: 0.75, storyLevel: 'ground', unit: 'in' }],
   },
   {
     estNum: '26661', jobNum: '1988', targetK: 550.00,
     desc: '25×15 + 20×25 Triple Pane Clear Ann',
     notes: 'No OA given → 1/8" default; triple_pane 1.75×; 1-tech; 0.625 crew-hr/pane (median of 0.5–0.75 hr range)',
     panes: [
-      { width: 25, height: 15, thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'none', shape: 'triple_pane', qty: 1, laborHrs: 0.625, storyLevel: 'ground', unit: 'in' },
-      { width: 20, height: 25, thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'none', shape: 'triple_pane', qty: 1, laborHrs: 0.625, storyLevel: 'ground', unit: 'in' },
+      { width: 25, height: 15, thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'none', shape: 'standard', unitType: 'triple_pane', qty: 1, laborHrs: 0.625, storyLevel: 'ground', unit: 'in' },
+      { width: 20, height: 25, thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'none', shape: 'standard', unitType: 'triple_pane', qty: 1, laborHrs: 0.625, storyLevel: 'ground', unit: 'in' },
     ],
   },
   {
     estNum: '26559', jobNum: '1995', targetK: 1549.00,
     desc: '60×59 Grey Temp',
     notes: '1" OA → 1/4" lite; "grey" → obscured (no rate → requiresQuote); proxy shown with clear_temp; 160 lbs → 2-tech auto; 1.25 crew-hr (median of 1–1.5 hr range)',
-    panes: [{ width: 60, height: 59, thickness: '1/4"', coating: 'obscured', finish: 'tempered', grid: 'none', shape: 'standard', qty: 1, laborHrs: 1.25, storyLevel: 'ground', unit: 'in' }],
-    proxy: [{ width: 60, height: 59, thickness: '1/4"', coating: 'clear', finish: 'tempered', grid: 'none', shape: 'standard', qty: 1, laborHrs: 1.25, storyLevel: 'ground', unit: 'in' }],
+    panes: [{ width: 60, height: 59, thickness: '1/4"', coating: 'obscured', finish: 'tempered', grid: 'none', shape: 'standard', unitType: 'double_pane', qty: 1, laborHrs: 1.25, storyLevel: 'ground', unit: 'in' }],
+    proxy: [{ width: 60, height: 59, thickness: '1/4"', coating: 'clear', finish: 'tempered', grid: 'none', shape: 'standard', unitType: 'double_pane', qty: 1, laborHrs: 1.25, storyLevel: 'ground', unit: 'in' }],
   },
   {
     estNum: '26564', jobNum: '1930', targetK: 699.00,
     desc: '34×58 Double-Coat Low-E Ann Grid',
     notes: '15/16" OA → 1/8" lite (15/16" = two 1/8" lites + spacer); c270 ann confirmed; standard grid; 1-tech; 1.25 crew-hr (median of 1–1.5 hr range). NOTE: product cost alone (~$617) nearly equals target ($699) — suspected below-list sale.',
-    panes: [{ width: 34, height: 58, thickness: '1/8"', coating: 'c270', finish: 'annealed', grid: 'standard', shape: 'standard', qty: 1, laborHrs: 1.25, storyLevel: 'ground', unit: 'in' }],
+    panes: [{ width: 34, height: 58, thickness: '1/8"', coating: 'c270', finish: 'annealed', grid: 'standard', shape: 'standard', unitType: 'double_pane', qty: 1, laborHrs: 1.25, storyLevel: 'ground', unit: 'in' }],
   },
   {
     estNum: '26585', jobNum: '1948', targetK: 549.00,
     desc: '38×41 Clear Ann IG',
     notes: 'No OA given → 1/8" default; rescreen excluded; 1-tech; 1.0 crew-hr (median of 0.5–1.5 hr range)',
-    panes: [{ width: 38, height: 41, thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'none', shape: 'standard', qty: 1, laborHrs: 1.0, storyLevel: 'ground', unit: 'in' }],
+    panes: [{ width: 38, height: 41, thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'none', shape: 'standard', unitType: 'double_pane', qty: 1, laborHrs: 1.0, storyLevel: 'ground', unit: 'in' }],
   },
   {
     estNum: '26584', jobNum: '1947', targetK: 979.00,
     desc: '40×58 Clear Temp Grid',
     notes: 'No OA given → 1/8" default; standard grid; 1-tech (52.8 lbs, ground); 0.75 crew-hr (median of 0.5–1 hr range)',
-    panes: [{ width: 40, height: 58, thickness: '1/8"', coating: 'clear', finish: 'tempered', grid: 'standard', shape: 'standard', qty: 1, laborHrs: 0.75, storyLevel: 'ground', unit: 'in' }],
+    panes: [{ width: 40, height: 58, thickness: '1/8"', coating: 'clear', finish: 'tempered', grid: 'standard', shape: 'standard', unitType: 'double_pane', qty: 1, laborHrs: 0.75, storyLevel: 'ground', unit: 'in' }],
   },
   {
     estNum: '26507', jobNum: '1917', targetK: 789.00,
     desc: '11×53 Hardcoat Ann Grid Triple Pane',
     notes: 'No OA given → 1/8" default; hardcoat → c270 rate; triple_pane 1.75×; standard grid; finish=Ann (N→default); 1-tech; 0.75 crew-hr (median of 0.5–1 hr range)',
-    panes: [{ width: 11, height: 53, thickness: '1/8"', coating: 'hardcoat', finish: 'annealed', grid: 'standard', shape: 'triple_pane', qty: 1, laborHrs: 0.75, storyLevel: 'ground', unit: 'in' }],
+    panes: [{ width: 11, height: 53, thickness: '1/8"', coating: 'hardcoat', finish: 'annealed', grid: 'standard', shape: 'standard', unitType: 'triple_pane', qty: 1, laborHrs: 0.75, storyLevel: 'ground', unit: 'in' }],
   },
 ];
 
