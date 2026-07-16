@@ -608,19 +608,37 @@
     }
 
     /* ================================================================
-       RUNNING TOTAL BAR
+       FLOATING PROGRESS BAR
     ================================================================ */
-    .total-bar {
-      background: var(--bg-2);
-      border-top: 1px solid var(--border-0);
+    .progress-strip {
+      background: color-mix(in srgb, var(--amber) 6%, var(--bg-1));
+      border-top: 2px solid color-mix(in srgb, var(--amber) 28%, var(--border-0));
       padding: 10px 16px;
       display: flex;
       align-items: center;
       justify-content: space-between;
+      flex-shrink: 0;
+      gap: 12px;
     }
-    .total-bar-label { font-size: 13px; color: var(--text-2); font-family: var(--font-title); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
-    .total-bar-price { font-family: var(--font-title); font-weight: 800; font-size: 28px; color: var(--amber); }
-    .total-bar-meta { font-size: 12px; color: var(--text-3); }
+    .progress-strip-count {
+      font-family: var(--font-semi);
+      font-weight: 700;
+      font-size: 13px;
+      color: var(--text-0);
+      background: color-mix(in srgb, var(--amber) 18%, var(--bg-2));
+      border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
+      border-radius: 100px;
+      padding: 3px 10px;
+      flex-shrink: 0;
+    }
+    .progress-strip-total {
+      font-family: var(--font-title);
+      font-weight: 800;
+      font-size: 20px;
+      color: var(--amber);
+      line-height: 1.1;
+      text-align: right;
+    }
 
     /* ================================================================
        SCROLL AREA
@@ -1893,6 +1911,26 @@ function render() {
 /* ================================================================
    RENDER: CONNECTION BADGE
 ================================================================ */
+function progressBar(d) {
+  if (!d) return '';
+  const count    = d.panes.length;
+  const jobCalc  = count > 0 ? calcJob(d.panes, d.supplier) : null;
+  const customer = d.customerName ? `<span style="font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px;">${d.customerName}</span>` : '';
+  return `
+  <div class="progress-strip">
+    <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+      <span class="progress-strip-count">${count} pane${count !== 1 ? 's' : ''}</span>
+      ${customer}
+    </div>
+    <div>
+      ${jobCalc
+        ? `<div class="progress-strip-total">${fmtRange(jobCalc.grandTotal)}</div>
+           <div style="font-size:10px;color:var(--text-3);text-align:right;">est. before tax</div>`
+        : `<div style="font-size:13px;color:var(--text-3);">add a pane to see total</div>`}
+    </div>
+  </div>`;
+}
+
 function headerNavIcons(opts = {}) {
   const u = app.currentUser;
   const isAdmin = u?.role === 'admin';
@@ -2327,12 +2365,9 @@ function renderNewQuoteStep1() {
       </div>
     </div>`:''}
 
-    ${d.panes.length>0?`
-    <div style="margin-top:12px;padding:10px 14px;background:var(--bg-2);border-radius:var(--radius-md);display:flex;justify-content:space-between;align-items:center;">
-      <span class="text-muted text-sm">${d.panes.length} pane${d.panes.length!==1?'s':''} added</span>
-      <span style="font-family:var(--font-title);font-weight:800;font-size:18px;color:var(--amber);">${fmtRange(jobCalc?jobCalc.grandTotal:0)} est.</span>
-    </div>`:''}
   </div>
+
+  ${!d.isAdminEdit ? progressBar(d) : ''}
 
   ${d.isAdminEdit ? `
   <div class="action-bar">
@@ -2407,18 +2442,7 @@ function renderNewQuoteStep2() {
     }
   </div>
 
-  <div style="background:var(--bg-2);border-top:1px solid var(--border-0);padding:10px 16px;">
-    <div class="flex-between">
-      <div>
-        <div style="font-size:12px;color:var(--text-2);">RUNNING TOTAL</div>
-        <div style="font-size:11px;color:var(--text-3);">Product + Labor + Materials</div>
-      </div>
-      <div style="text-align:right;">
-        <div style="font-family:var(--font-title);font-weight:800;font-size:26px;color:var(--amber);">${jobCalc ? fmtRange(jobCalc.grandTotal) : '$0.00'}</div>
-        <div style="font-size:11px;color:var(--text-3);">before tax</div>
-      </div>
-    </div>
-  </div>
+  ${progressBar(d)}
   <div class="action-bar">
     <button class="btn btn-primary btn-full" id="proceed-to-review">
       Review & Send →
@@ -2530,6 +2554,8 @@ function renderReview() {
 
     ${!app.isOnline?`<div class="alert alert-warning mt-12"><span class="alert-icon">⚠</span>You are offline. This quote will be queued and synced when connected.</div>`:''}
   </div>
+
+  ${!d.isAdminEdit ? progressBar(d) : ''}
 
   <!-- Action Bar -->
   ${d.isAdminEdit ? `
