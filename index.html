@@ -133,7 +133,7 @@
     ================================================================ */
     #app {
       height: 100vh;
-      height: 100dvh;
+      height: 100svh;
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -1908,20 +1908,29 @@ function render() {
     return;
   }
 
+  // Save scroll position before replacing DOM (chip clicks, toggles, etc.)
+  const scroller = el.querySelector('.scroll-content');
+  const savedScroll = (!app._routeChanged && scroller) ? scroller.scrollTop : 0;
+
   switch (app.route) {
-    case 'login':     el.innerHTML = renderLogin(); break;
-    case 'home':      el.innerHTML = renderHome(); break;
-    case 'new-quote': el.innerHTML = renderNewQuote(); break;
-    case 'review':    el.innerHTML = renderReview(); break;
-    case 'sent':      el.innerHTML = renderSent(); break;
+    case 'login':        el.innerHTML = renderLogin(); break;
+    case 'home':         el.innerHTML = renderHome(); break;
+    case 'new-quote':    el.innerHTML = renderNewQuote(); break;
+    case 'review':       el.innerHTML = renderReview(); break;
+    case 'sent':         el.innerHTML = renderSent(); break;
     case 'history':      el.innerHTML = renderHistory(); break;
     case 'admin':        el.innerHTML = renderAdmin(); break;
     case 'quote-detail': el.innerHTML = renderQuoteDetail(); break;
-    default:          el.innerHTML = renderLogin();
+    default:             el.innerHTML = renderLogin();
   }
 
-  // Suppress fadeIn animation for in-screen state updates (chip clicks, toggles, etc.)
-  // Only let it play on real route navigations so screen transitions still feel smooth
+  // Restore scroll for in-screen updates; skip on actual route transitions
+  if (!app._routeChanged && savedScroll > 0) {
+    const newScroller = el.querySelector('.scroll-content');
+    if (newScroller) newScroller.scrollTop = savedScroll;
+  }
+
+  // Suppress fadeIn animation for in-screen state updates
   if (!app._routeChanged) {
     const screen = el.querySelector('.screen');
     if (screen) screen.style.animation = 'none';
