@@ -63,6 +63,15 @@ const PRICE_CATALOG = {
   },
 };
 
+const appConfig = { mult_default: 3, mult_threshold: null, mult_high: 2 };
+
+function getSellMultiplier(glassCost) {
+  const def  = appConfig.mult_default   ?? PRICE_CATALOG.sellMultiplier;
+  const thr  = appConfig.mult_threshold ?? null;
+  const high = appConfig.mult_high      ?? 2;
+  return (thr && glassCost > thr) ? high : def;
+}
+
 function calcPaneWeight(pane) {
   if (!pane.width || !pane.height || !pane.thickness) return null;
   const ut = pane.unitType || (pane.shape === 'triple_pane' ? 'triple_pane' : 'double_pane');
@@ -115,7 +124,8 @@ function calcPane(pane, supplier) {
   const crewSize       = isHeavyLift(pane) ? 2 : 1;
   const laborRate      = PRICE_CATALOG.laborRates[crewSize];
   const laborCost      = laborHrs * laborRate;
-  const productCost    = +(glassCost * PRICE_CATALOG.sellMultiplier * qty + customGridFlat * qty).toFixed(2);
+  const sellMult       = getSellMultiplier(glassCost);
+  const productCost    = +(glassCost * sellMult * qty + customGridFlat * qty).toFixed(2);
   const laborTotal     = +(laborCost * qty).toFixed(2);
   const lineTotal      = +(productCost + laborTotal).toFixed(2);
 

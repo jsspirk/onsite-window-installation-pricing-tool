@@ -1426,7 +1426,11 @@ let appConfig = {
   brand_logo_horiz_url:  null,
   default_supplier:      'busick',
   range_band:            0.08,
+  round_increment:       25,
   markup_tiers:          null,
+  mult_default:          3,
+  mult_threshold:        null,
+  mult_high:             2,
 };
 
 /* ================================================================
@@ -1479,7 +1483,8 @@ function calcPane(pane, supplier) {
   const crewSize       = isHeavyLift(pane) ? 2 : 1;
   const laborRate      = PRICE_CATALOG.laborRates[crewSize];
   const laborCost      = laborHrs * laborRate;
-  const productCost    = +(glassCost * PRICE_CATALOG.sellMultiplier * qty + customGridFlat * qty).toFixed(2);
+  const sellMult       = getSellMultiplier(glassCost);
+  const productCost    = +(glassCost * sellMult * qty + customGridFlat * qty).toFixed(2);
   const laborTotal     = +(laborCost * qty).toFixed(2);
   const lineTotal      = +(productCost + laborTotal).toFixed(2);
 
@@ -1695,6 +1700,22 @@ function fmtRange(n) {
   const high = n * (1 + band);
   return `${fmt(low)} \u2013 ${fmt(high)}`;
 }
+
+function fmtRangeCustomer(n) {
+  const band = appConfig.range_band    || 0.08;
+  const inc  = appConfig.round_increment || 25;
+  const low  = Math.floor(Math.max(400, n * (1 - band)) / inc) * inc;
+  const high = Math.floor(n * (1 + band) / inc) * inc;
+  return `${fmt(low)} \u2013 ${fmt(high)}`;
+}
+
+function getSellMultiplier(glassCost) {
+  const def  = appConfig.mult_default   ?? PRICE_CATALOG.sellMultiplier;
+  const thr  = appConfig.mult_threshold ?? null;
+  const high = appConfig.mult_high      ?? 2;
+  return (thr && glassCost > thr) ? high : def;
+}
+
 function fmtDate(iso) {
   const d = new Date(iso);
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -2367,7 +2388,7 @@ function renderNewQuoteStep1() {
 
   </div>
 
-  ${!d.isAdminEdit ? progressBar(d) : ''}
+  ${progressBar(d)}
 
   ${d.isAdminEdit ? `
   <div class="action-bar">
@@ -2555,7 +2576,7 @@ function renderReview() {
     ${!app.isOnline?`<div class="alert alert-warning mt-12"><span class="alert-icon">⚠</span>You are offline. This quote will be queued and synced when connected.</div>`:''}
   </div>
 
-  ${!d.isAdminEdit ? progressBar(d) : ''}
+  ${progressBar(d)}
 
   <!-- Action Bar -->
   ${d.isAdminEdit ? `
@@ -2756,7 +2777,7 @@ function renderHistoryItem(q, showTech = false) {
    SCREEN: ADMIN
 ================================================================ */
 function renderAdmin() {
-  const tabs = ['Glass Types', 'Labor & Mods', 'Materials', 'Pricing Tiers', 'Quote Log', 'Branding'];
+  const tabs = ['Glass Types', 'Labor & Pricing', 'Materials', 'Quote Log', 'Branding'];
   const t = app.activeTab;
   return `
 <div class="screen" style="background:var(--bg-0);">
@@ -2776,9 +2797,8 @@ function renderAdmin() {
     ${t === 0 ? renderAdminGlassTypes() : ''}
     ${t === 1 ? renderAdminLabor() : ''}
     ${t === 2 ? renderAdminMaterials() : ''}
-    ${t === 3 ? renderAdminPricingTiers() : ''}
-    ${t === 4 ? renderAdminQuoteLog() : ''}
-    ${t === 5 ? renderAdminBranding() : ''}
+    ${t === 3 ? renderAdminQuoteLog() : ''}
+    ${t === 4 ? renderAdminBranding() : ''}
   </div>
 </div>`;
 }
@@ -2839,15 +2859,25 @@ function renderAdminGlassTypes() {
 }
 
 function renderAdminLabor() {
-  const laborRates     = PRICE_CATALOG.laborRates;
+  const laborRates      = PRICE_CATALOG.laborRates;
   const defaultSupplier = appConfig.default_supplier || 'busick';
-  const rangeBand      = String(appConfig.range_band ?? 0.08);
-  const SUPPLIER_OPTS  = Object.entries(PRICE_CATALOG.suppliers).map(([id,s])=>({id, name:s.name}));
-  const BAND_OPTS      = [
+  const rangeBand       = String(appConfig.range_band ?? 0.08);
+  const roundIncrement  = String(appConfig.round_increment ?? 25);
+  const multDefault     = appConfig.mult_default   ?? 3;
+  const multThreshold   = appConfig.mult_threshold ?? '';
+  const multHigh        = appConfig.mult_high      ?? 2;
+  const SUPPLIER_OPTS   = Object.entries(PRICE_CATALOG.suppliers).map(([id,s])=>({id, name:s.name}));
+  const BAND_OPTS       = [
     {id:'0.05', label:'±5%'},
     {id:'0.08', label:'±8%'},
     {id:'0.10', label:'±10%'},
     {id:'0.15', label:'±15%'},
+  ];
+  const ROUND_OPTS      = [
+    {id:'10',  label:'$10'},
+    {id:'25',  label:'$25'},
+    {id:'50',  label:'$50'},
+    {id:'100', label:'$100'},
   ];
   return `
 <div>
@@ -2875,9 +2905,50 @@ function renderAdminLabor() {
 
   <div class="section-label mb-8">Quote Range Band</div>
   <div style="font-size:13px;color:var(--text-2);margin-bottom:10px;">Controls the ± spread shown to customers. Hard floor: $400 minimum on the low end.</div>
-  <div class="chip-group mb-0">
+  <div class="chip-group mb-16">
     ${BAND_OPTS.map(b=>`<div class="chip ${rangeBand===b.id?'active':''}" data-admin-band="${b.id}">${b.label}</div>`).join('')}
   </div>
+
+  <div class="section-label mb-8">Customer Range Rounding</div>
+  <div style="font-size:13px;color:var(--text-2);margin-bottom:10px;">Customer-facing estimate range is floored to the nearest increment on both ends.</div>
+  <div class="chip-group mb-16">
+    ${ROUND_OPTS.map(r=>`<div class="chip ${roundIncrement===r.id?'active':''}" data-admin-round="${r.id}">${r.label}</div>`).join('')}
+  </div>
+
+  <div class="section-label mb-8">Sell Multiplier</div>
+  <div style="font-size:13px;color:var(--text-2);margin-bottom:12px;">Glass sell price = supplier cost × multiplier. Per COST CALCULATOR 2.27.2026.</div>
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+    <input id="admin-mult-default" type="number" min="1" max="10" step="0.25"
+      value="${multDefault}"
+      style="width:90px;padding:8px 10px;font-size:20px;font-family:var(--font-title);font-weight:800;color:var(--amber);background:var(--bg-1);border:1.5px solid var(--border-0);border-radius:var(--radius-md);text-align:center;" />
+    <span style="font-size:20px;font-weight:700;color:var(--amber);">×</span>
+    <span style="font-size:13px;color:var(--text-3);">default, applied to all jobs</span>
+  </div>
+
+  <div class="section-label mb-8">High-Cost Threshold (optional)</div>
+  <div style="font-size:13px;color:var(--text-2);margin-bottom:12px;">When glass cost exceeds the threshold, apply a lower multiplier. Leave blank to use the default on all jobs.</div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+    <div style="flex:1;min-width:140px;">
+      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Glass cost threshold ($)</div>
+      <input id="admin-mult-threshold" type="number" min="0" step="100" placeholder="e.g. 1000"
+        value="${multThreshold}"
+        style="width:100%;padding:8px 10px;font-size:15px;background:var(--bg-1);border:1.5px solid var(--border-0);border-radius:var(--radius-md);" />
+    </div>
+    <div style="flex:1;min-width:120px;">
+      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Multiplier above threshold</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <input id="admin-mult-high" type="number" min="1" max="10" step="0.25"
+          value="${multHigh}"
+          style="width:80px;padding:8px 10px;font-size:15px;background:var(--bg-1);border:1.5px solid var(--border-0);border-radius:var(--radius-md);text-align:center;" />
+        <span style="font-size:15px;font-weight:700;color:var(--amber);">×</span>
+      </div>
+    </div>
+  </div>
+  ${multThreshold
+    ? `<div style="padding:10px 14px;background:var(--bg-2);border:1px solid var(--border-0);border-radius:var(--radius-md);font-size:13px;color:var(--text-1);">
+         Active: glass cost ≤ $${fmt(Number(multThreshold))} → ${multDefault}×&nbsp;&nbsp;·&nbsp;&nbsp;glass cost > $${fmt(Number(multThreshold))} → ${multHigh}×
+       </div>`
+    : `<div style="font-size:13px;color:var(--text-3);">No threshold set — all jobs use ${multDefault}×.</div>`}
 </div>`;
 }
 
@@ -2911,19 +2982,45 @@ function renderAdminMaterials() {
 }
 
 function renderAdminPricingTiers() {
+  const multDefault   = appConfig.mult_default   ?? 3;
+  const multThreshold = appConfig.mult_threshold ?? '';
+  const multHigh      = appConfig.mult_high      ?? 2;
   return `
 <div>
-  <div class="section-label mb-8">Sell Multiplier</div>
-  <div style="font-size:13px;color:var(--text-2);margin-bottom:16px;">
-    Glass sell price = supplier invoice cost × ${PRICE_CATALOG.sellMultiplier}. Applied uniformly to all glass types and job sizes.
+  <div class="section-label mb-8">Default Sell Multiplier</div>
+  <div style="font-size:13px;color:var(--text-2);margin-bottom:12px;">Glass sell price = supplier cost × multiplier. Per COST CALCULATOR 2.27.2026.</div>
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+    <input id="admin-mult-default" type="number" min="1" max="10" step="0.25"
+      value="${multDefault}"
+      style="width:90px;padding:8px 10px;font-size:20px;font-family:var(--font-title);font-weight:800;color:var(--amber);background:var(--bg-1);border:1.5px solid var(--border-0);border-radius:var(--radius-md);text-align:center;" />
+    <span style="font-size:20px;font-weight:700;color:var(--amber);">×</span>
+    <span style="font-size:13px;color:var(--text-3);">applied to all jobs by default</span>
   </div>
-  <div class="card" style="display:flex;align-items:center;gap:16px;">
-    <div style="font-size:40px;font-family:var(--font-title);font-weight:800;color:var(--amber);flex-shrink:0;">${PRICE_CATALOG.sellMultiplier}×</div>
-    <div style="font-size:13px;color:var(--text-2);line-height:1.6;">
-      Per COST CALCULATOR 2.27.2026.<br>
-      To change, update <code>sellMultiplier</code> in <code>PRICE_CATALOG</code> in the source.
+
+  <div class="section-label mb-8">High-Cost Override (optional)</div>
+  <div style="font-size:13px;color:var(--text-2);margin-bottom:12px;">When glass cost exceeds the threshold, apply a lower multiplier. Leave threshold blank to use the default on all jobs.</div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+    <div style="flex:1;min-width:140px;">
+      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Glass cost threshold ($)</div>
+      <input id="admin-mult-threshold" type="number" min="0" step="100" placeholder="e.g. 1000"
+        value="${multThreshold}"
+        style="width:100%;padding:8px 10px;font-size:15px;background:var(--bg-1);border:1.5px solid var(--border-0);border-radius:var(--radius-md);" />
+    </div>
+    <div style="flex:1;min-width:120px;">
+      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Multiplier above threshold</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <input id="admin-mult-high" type="number" min="1" max="10" step="0.25"
+          value="${multHigh}"
+          style="width:80px;padding:8px 10px;font-size:15px;background:var(--bg-1);border:1.5px solid var(--border-0);border-radius:var(--radius-md);text-align:center;" />
+        <span style="font-size:15px;font-weight:700;color:var(--amber);">×</span>
+      </div>
     </div>
   </div>
+  ${multThreshold
+    ? `<div style="padding:10px 14px;background:var(--bg-2);border:1px solid var(--border-0);border-radius:var(--radius-md);font-size:13px;color:var(--text-1);">
+         Active: glass cost ≤ $${fmt(Number(multThreshold))} → ${multDefault}×&nbsp;&nbsp;·&nbsp;&nbsp;glass cost > $${fmt(Number(multThreshold))} → ${multHigh}×
+       </div>`
+    : `<div style="font-size:13px;color:var(--text-3);">No threshold set — all jobs use ${multDefault}×.</div>`}
 </div>`;
 }
 
@@ -3226,21 +3323,17 @@ function renderCustomerView(quoteId) {
   <div class="cv-divider"></div>
 
   ${lineItems.map((item, i) => `
-  <div style="margin-bottom:16px;">
-    <div class="cv-label">Pane ${i+1}${item.location?' — '+item.location:''} — ${getPaneLabel(item)}${(item.qty||1)>1?' (×'+item.qty+')':''}</div>
-    <div class="cv-line-item"><span class="cv-line-label">${item.width}" × ${item.height}"${item.sqft?' ('+item.sqft.toFixed(2)+' sqft)':''}</span><span class="cv-line-value">${item.productCost ? fmt(item.productCost) : 'QUOTE'}</span></div>
-    <div class="cv-line-item"><span class="cv-line-label">Labor</span><span class="cv-line-value">${item.laborCost?fmt(item.laborCost):'—'}</span></div>
+  <div style="margin-bottom:10px;">
+    <div class="cv-label">Pane ${i+1}${item.location?' — '+item.location:''}</div>
+    <div style="font-size:14px;color:var(--text-1);">${getPaneLabel(item)}${(item.qty||1)>1?' (×'+item.qty+')':''} · ${item.width}" × ${item.height}"${item.sqft?' ('+item.sqft.toFixed(2)+' sqft)':''}</div>
   </div>
   `).join('')}
 
   <div class="cv-divider"></div>
 
-  <div class="cv-line-item"><span class="cv-line-label">Total Glass/Product</span><span class="cv-line-value">${fmt(q.totalProduct)}</span></div>
-  <div class="cv-line-item"><span class="cv-line-label">Total Labor</span><span class="cv-line-value">${fmt(q.totalLabor)}</span></div>
-
   <div class="cv-total" style="border-top:2px solid #000;margin-top:8px;">
     <span class="cv-total-label">ESTIMATE RANGE</span>
-    <span class="cv-total-value" style="font-size:22px;">${fmtRange(q.grandTotal)}</span>
+    <span class="cv-total-value" style="font-size:22px;">${fmtRangeCustomer(q.grandTotal)}</span>
   </div>
 
   <div class="cv-disclaimer">
@@ -3411,6 +3504,23 @@ function attachEvents() {
   delegate('[data-admin-band]', 'click', async e => {
     await saveConfig({ range_band: parseFloat(e.currentTarget.dataset.adminBand) });
     render();
+  });
+  delegate('[data-admin-round]', 'click', async e => {
+    await saveConfig({ round_increment: parseInt(e.currentTarget.dataset.adminRound) });
+    render();
+  });
+  on('admin-mult-default', 'change', async e => {
+    const v = parseFloat(e.target.value);
+    if (!isNaN(v) && v > 0) { await saveConfig({ mult_default: v }); render(); }
+  });
+  on('admin-mult-threshold', 'change', async e => {
+    const raw = e.target.value.trim();
+    await saveConfig({ mult_threshold: raw ? parseFloat(raw) : null });
+    render();
+  });
+  on('admin-mult-high', 'change', async e => {
+    const v = parseFloat(e.target.value);
+    if (!isNaN(v) && v > 0) { await saveConfig({ mult_high: v }); render(); }
   });
 
   // ---- BRANDING ----
@@ -3803,7 +3913,6 @@ function attachEvents() {
   // ---- ADMIN ----
   on('back-home-admin', 'click', () => navigate('home'));
   delegate('[data-tab]', 'click', e => {
-    if (app.activeTab === 3) app.draftTiers = null; // discard unsaved tier edits on tab leave
     app.activeTab = parseInt(e.currentTarget.dataset.tab);
     app.editMode = null;
     render();
