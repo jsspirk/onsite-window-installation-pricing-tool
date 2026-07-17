@@ -132,10 +132,11 @@
        APP SHELL
     ================================================================ */
     #app {
-      min-height: 100vh;
-      min-height: 100dvh;
+      height: 100vh;
+      height: 100dvh;
       display: flex;
       flex-direction: column;
+      overflow: hidden;
     }
 
     .screen {
@@ -645,6 +646,7 @@
     ================================================================ */
     .scroll-content {
       flex: 1;
+      min-height: 0;
       overflow-y: auto;
       padding: 16px;
       -webkit-overflow-scrolling: touch;
