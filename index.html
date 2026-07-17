@@ -1952,11 +1952,13 @@ function progressBar(d) {
   </div>`;
 }
 
+const ICON_NOTEBOOK = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="11" height="16" rx="1.5"/><line x1="8" y1="7" x2="13" y2="7"/><line x1="8" y1="10.5" x2="13" y2="10.5"/><line x1="8" y1="14" x2="11" y2="14"/><line x1="2" y1="5" x2="5" y2="5"/><line x1="2" y1="10" x2="5" y2="10"/><line x1="2" y1="15" x2="5" y2="15"/></svg>`;
+
 function headerNavIcons(opts = {}) {
   const u = app.currentUser;
   const isAdmin = u?.role === 'admin';
-  const hasDraft = app.draft && (app.draft.customerName || app.draft.panes?.length > 0);
   return `
+    ${opts.showNewQuote !== false ? `<button class="icon-btn" data-nav-new-quote title="New Quote">${ICON_NOTEBOOK}</button>` : ''}
     ${opts.showHome !== false ? `<button class="icon-btn" data-nav-home title="Home">⌂</button>` : ''}
     ${opts.showHistory !== false ? `<button class="icon-btn" data-nav-history title="Job Log">☰</button>` : ''}
     ${isAdmin && opts.showAdmin !== false ? `<button class="icon-btn" data-nav-admin title="Admin">⚙</button>` : ''}
@@ -2043,6 +2045,7 @@ function renderHome() {
       ? `<img src="${brand.logoHoriz}" alt="${brand.name}" style="height:42px;max-width:240px;object-fit:contain;" />`
       : `<div class="header-logo">${brand.name}</div>`}
     <div class="header-right">
+      <button class="icon-btn" data-nav-new-quote title="New Quote">${ICON_NOTEBOOK}</button>
       <button class="icon-btn" data-nav-history title="Job Log">☰</button>
       ${u.role === 'admin' ? `<button class="icon-btn" data-nav-admin title="Admin Panel">⚙</button>` : ''}
       <button class="icon-btn" id="home-logout-btn" title="Sign Out">⎋</button>
@@ -2183,7 +2186,7 @@ function renderNewQuoteStep1() {
   <div class="app-header">
     <button class="header-back-btn" id="${d.isAdminEdit ? 'back-to-quote-detail' : 'back-home'}">←</button>
     <div class="header-title">${d.isAdminEdit ? 'Edit Pane' : 'New Quote'}</div>
-    <div class="header-right">${headerNavIcons({ showHome: false, showAdmin: false })}</div>
+    <div class="header-right">${headerNavIcons({ showHome: false, showAdmin: false, showNewQuote: false })}</div>
   </div>
   ${d.isAdminEdit ? '' : stepIndicator(0)}
 
@@ -2423,7 +2426,7 @@ function renderNewQuoteStep2() {
   <div class="app-header">
     <button class="header-back-btn" id="back-step1">←</button>
     <div class="header-title">Pane List</div>
-    <div class="header-right">${headerNavIcons({ showHome: false, showAdmin: false })}</div>
+    <div class="header-right">${headerNavIcons({ showHome: false, showAdmin: false, showNewQuote: false })}</div>
   </div>
   ${stepIndicator(1)}
 
@@ -2485,7 +2488,7 @@ function renderReview() {
   <div class="app-header">
     <button class="header-back-btn" id="${d.isAdminEdit ? 'back-to-admin-log' : 'back-to-pane-list'}">←</button>
     <div class="header-title">${d.isAdminEdit ? 'Edit Quote' : 'Quote Review'}</div>
-    <div class="header-right">${headerNavIcons({ showHome: false, showAdmin: false })}</div>
+    <div class="header-right">${headerNavIcons({ showHome: false, showAdmin: false, showNewQuote: false })}</div>
   </div>
   ${d.isAdminEdit ? '' : stepIndicator(2)}
 
@@ -3811,6 +3814,13 @@ function attachEvents() {
   });
 
   // Persistent header nav
+  delegate('[data-nav-new-quote]', 'click', () => {
+    if (app.draft && (app.draft.customerName || app.draft.panes?.length > 0) && !app.draft.isAdminEdit) {
+      if (!confirm('Start a new quote? Current draft will be discarded.')) return;
+    }
+    app.draft = newDraft();
+    navigate('new-quote');
+  });
   delegate('[data-nav-home]', 'click', () => {
     if (app.draft && (app.draft.customerName || app.draft.panes?.length > 0) && !app.draft.isAdminEdit) {
       if (!confirm('Leave this quote? Unsaved changes will be lost.')) return;
