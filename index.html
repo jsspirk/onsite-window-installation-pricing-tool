@@ -812,15 +812,6 @@
     .login-form {
       display: flex; flex-direction: column; gap: 14px;
     }
-    .login-demo-hint {
-      background: var(--bg-2);
-      border: 1px solid var(--border-0);
-      border-radius: var(--radius-md);
-      padding: 12px 14px;
-      font-size: 13px;
-      color: var(--text-2);
-    }
-    .login-demo-hint strong { color: var(--amber); font-weight: 600; }
     .login-error {
       color: var(--red);
       font-size: 14px;
@@ -2000,13 +1991,6 @@ function renderLogin() {
   </div>
 
   <div class="login-form">
-    <div class="login-demo-hint">
-      <strong>Demo Credentials</strong><br>
-      Tech 1: <strong>tech1@demo.com</strong> / demo<br>
-      Admin (CJ): <strong>CJ@demo.com</strong> / demo<br>
-      Admin (Eric): <strong>eric@demo.com</strong> / demo
-    </div>
-
     <div class="form-group">
       <label class="form-label">Email</label>
       <input class="form-input" id="login-user" type="email" autocomplete="email"
