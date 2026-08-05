@@ -130,9 +130,10 @@ function fmt(n) {
 }
 
 function fmtRange(n) {
-  const band = parseFloat(localStorage.getItem('fg_range_band') || '0.08');
-  const low  = Math.max(400, n * (1 - band));
-  const high = n * (1 + band);
+  const band  = parseFloat(localStorage.getItem('fg_range_band') || '0.08');
+  const floor = parseFloat(localStorage.getItem('fg_min_job_cost') || '400');
+  const low   = Math.max(floor, n * (1 - band));
+  const high  = n * (1 + band);
   return `${fmt(low)} \u2013 ${fmt(high)}`;
 }
 
@@ -248,8 +249,8 @@ function getPaneLabel(pane) {
     clear:    'Clear',
     hardcoat: 'Hardcoat',
     c180:     'Single Softcoat',
-    c270:     'Double Hardcoat',
-    c360:     'Triple Hardcoat',
+    c270:     'Double Softcoat',
+    c360:     'Triple Softcoat',
     obscured: 'Obscured/Privacy',
   };
   const finishMap = { annealed: 'Ann.', tempered: 'Temp.' };
@@ -310,11 +311,11 @@ function pane(overrides = {}) {
 
 section('A. Coating chip labels');
 
-test('c270 renders as "Double Hardcoat"', () => {
-  assert.strictEqual(getPaneLabel(pane({ coating: 'c270', finish: 'annealed' })).includes('Double Hardcoat'), true);
+test('c270 renders as "Double Softcoat"', () => {
+  assert.strictEqual(getPaneLabel(pane({ coating: 'c270', finish: 'annealed' })).includes('Double Softcoat'), true);
 });
-test('c360 renders as "Triple Hardcoat"', () => {
-  assert.strictEqual(getPaneLabel(pane({ coating: 'c360', finish: 'annealed' })).includes('Triple Hardcoat'), true);
+test('c360 renders as "Triple Softcoat"', () => {
+  assert.strictEqual(getPaneLabel(pane({ coating: 'c360', finish: 'annealed' })).includes('Triple Softcoat'), true);
 });
 test('c180 renders as "Single Softcoat"', () => {
   assert.strictEqual(getPaneLabel(pane({ coating: 'c180', finish: 'annealed' })).includes('Single Softcoat'), true);
@@ -531,6 +532,26 @@ test('admin-configured band ±15% is respected', () => {
   assert.ok(result.includes('$1,700.00'), `Low should be $1,700.00 at ±15%, got: ${result}`);
   assert.ok(result.includes('$2,300.00'), `High should be $2,300.00, got: ${result}`);
   delete _store['fg_range_band'];
+});
+
+test('default floor is $400 when fg_min_job_cost not set', () => {
+  delete _store['fg_min_job_cost'];
+  const result = fmtRange(420); // 420 × 0.92 = 386.40 → floored to $400
+  assert.ok(result.startsWith('$400.00'), `Low end should be floored at $400.00, got: ${result}`);
+});
+
+test('admin-configured min job cost floor is respected', () => {
+  localStorage.setItem('fg_min_job_cost', '600');
+  const result = fmtRange(420); // 420 × 0.92 = 386.40 → floored to $600
+  assert.ok(result.startsWith('$600.00'), `Low end should be floored at $600.00, got: ${result}`);
+  delete _store['fg_min_job_cost'];
+});
+
+test('admin-configured min job cost does not affect prices above the floor', () => {
+  localStorage.setItem('fg_min_job_cost', '600');
+  const result = fmtRange(1000);
+  assert.ok(result.includes('$920.00'), `Low end should be $920.00 (unaffected by $600 floor), got: ${result}`);
+  delete _store['fg_min_job_cost'];
 });
 
 // ─── G. Admin-locked default supplier ────────────────────────────────────────

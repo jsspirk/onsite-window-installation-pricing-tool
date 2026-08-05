@@ -1380,6 +1380,7 @@ const app = {
   activeTab: 0,
   historySearch: '',
   homeSearch: '',
+  adminQuoteSearch: '',
   sendModal: false,
   customerViewOpen: false,
   customerViewQuoteId: null,
@@ -1395,6 +1396,7 @@ let appConfig = {
   default_supplier:      'busick',
   range_band:            0.08,
   round_increment:       25,
+  min_job_cost:          400,
   markup_tiers:          null,
   mult_default:          3,
   mult_threshold:        null,
@@ -1664,7 +1666,8 @@ function fmt(n) {
 
 function fmtRange(n) {
   const band = appConfig.range_band || 0.08;
-  const low  = Math.max(400, n * (1 - band));
+  const floor = appConfig.min_job_cost ?? 400;
+  const low  = Math.max(floor, n * (1 - band));
   const high = n * (1 + band);
   return `${fmt(low)} \u2013 ${fmt(high)}`;
 }
@@ -1672,7 +1675,8 @@ function fmtRange(n) {
 function fmtRangeCustomer(n) {
   const band = appConfig.range_band    || 0.08;
   const inc  = appConfig.round_increment || 25;
-  const low  = Math.floor(Math.max(400, n * (1 - band)) / inc) * inc;
+  const floor = appConfig.min_job_cost ?? 400;
+  const low  = Math.floor(Math.max(floor, n * (1 - band)) / inc) * inc;
   const high = Math.floor(n * (1 + band) / inc) * inc;
   return `${fmt(low)} \u2013 ${fmt(high)}`;
 }
@@ -1705,8 +1709,8 @@ function getPaneLabel(pane) {
     clear:    'Clear',
     hardcoat: 'Hardcoat',
     c180:     'Single Softcoat',
-    c270:     'Double Hardcoat',
-    c360:     'Triple Hardcoat',
+    c270:     'Double Softcoat',
+    c360:     'Triple Softcoat',
     obscured: 'Obscured/Privacy',
   };
   const finishMap = { annealed: 'Ann.', tempered: 'Temp.' };
@@ -1784,6 +1788,17 @@ const FRAC_OPTS = [
   { id: '3/4', label: '¾',  val: 3/4    },
   { id: '7/8', label: '⅞',  val: 7/8    },
 ];
+
+/**
+ * Enables/disables the fraction chips for a dimension (width or height)
+ * in place, without a full re-render, so they respond immediately as the
+ * whole-number field is typed rather than only after it loses focus.
+ */
+function updateFracChipsEnabled(dim, enabled) {
+  document.querySelectorAll(`[data-dim="${dim}"]`).forEach(el => {
+    el.classList.toggle('chip-disabled', !enabled);
+  });
+}
 
 /**
  * Given a whole number (int) and fraction id string (e.g. '3/4'),
@@ -2124,8 +2139,8 @@ function renderNewQuoteStep1() {
         {id:'clear',    label:'Clear'},
         {id:'hardcoat', label:'Hardcoat'},
         {id:'c180',     label:'Single Softcoat'},
-        {id:'c270',     label:'Double Hardcoat'},
-        {id:'c360',     label:'Triple Hardcoat'},
+        {id:'c270',     label:'Double Softcoat'},
+        {id:'c360',     label:'Triple Softcoat'},
         {id:'obscured', label:'Obscured / Privacy / Other'},
       ];
   const FINISH_OPTS = [{id:'annealed',label:'Annealed'},{id:'tempered',label:'Tempered'}];
@@ -2831,6 +2846,7 @@ function renderAdminLabor() {
   const defaultSupplier = appConfig.default_supplier || 'busick';
   const rangeBand       = String(appConfig.range_band ?? 0.08);
   const roundIncrement  = String(appConfig.round_increment ?? 25);
+  const minJobCost      = appConfig.min_job_cost ?? 400;
   const multDefault     = appConfig.mult_default   ?? 3;
   const multThreshold   = appConfig.mult_threshold ?? '';
   const multHigh        = appConfig.mult_high      ?? 2;
@@ -2872,9 +2888,19 @@ function renderAdminLabor() {
   </div>
 
   <div class="section-label mb-8">Quote Range Band</div>
-  <div style="font-size:13px;color:var(--text-2);margin-bottom:10px;">Controls the ± spread shown to customers. Hard floor: $400 minimum on the low end.</div>
+  <div style="font-size:13px;color:var(--text-2);margin-bottom:10px;">Controls the ± spread shown to customers.</div>
   <div class="chip-group mb-16">
     ${BAND_OPTS.map(b=>`<div class="chip ${rangeBand===b.id?'active':''}" data-admin-band="${b.id}">${b.label}</div>`).join('')}
+  </div>
+
+  <div class="section-label mb-8">Minimum Job Cost</div>
+  <div style="font-size:13px;color:var(--text-2);margin-bottom:10px;">Hard floor on the low end of every quote range — no bid goes below this, regardless of price or band.</div>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;">
+    <span style="font-size:20px;font-weight:700;color:var(--amber);">$</span>
+    <input id="admin-min-job-cost" type="number" min="0" step="25"
+      value="${minJobCost}"
+      style="width:110px;padding:8px 10px;font-size:20px;font-family:var(--font-title);font-weight:800;color:var(--amber);background:var(--bg-1);border:1.5px solid var(--border-0);border-radius:var(--radius-md);text-align:center;" />
+    <span style="font-size:13px;color:var(--text-3);">minimum, applied to all jobs</span>
   </div>
 
   <div class="section-label mb-8">Customer Range Rounding</div>
@@ -2943,7 +2969,7 @@ function renderAdminMaterials() {
       <div>glassCost = SF × (rawRate + gridAdder) × shapeMult × supplierMarkup</div>
       <div>paneTotal = glassCost × ${PRICE_CATALOG.sellMultiplier} + laborHrs × laborRate</div>
       <div>laborRate = $${PRICE_CATALOG.laborRates[1]}/hr (1-tech) or $${PRICE_CATALOG.laborRates[2]}/hr (2-tech crew)</div>
-      <div>range = paneTotal × (1 ± band), floor $400</div>
+      <div>range = paneTotal × (1 ± band), floor $${appConfig.min_job_cost ?? 400}</div>
     </div>
   </div>
 </div>`;
@@ -2993,11 +3019,20 @@ function renderAdminPricingTiers() {
 }
 
 function renderAdminQuoteLog() {
-  const all = appData.quotes.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const search = (app.adminQuoteSearch || '').toLowerCase();
+  const all = appData.quotes
+    .filter(q => !search ||
+      (q.customerName || '').toLowerCase().includes(search) ||
+      (q.jobNum || '').toLowerCase().includes(search))
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   return `
 <div>
   <div class="section-label mb-12">All Quotes — ${all.length} total</div>
-  ${all.length === 0 ? `<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">No quotes yet</div></div>` : ''}
+  <div class="search-input-wrap mb-12">
+    <span class="search-icon">🔍</span>
+    <input class="search-input" id="admin-quote-search" placeholder="Search by estimate # or customer name…" value="${app.adminQuoteSearch || ''}" />
+  </div>
+  ${all.length === 0 ? `<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">${search ? 'No matches' : 'No quotes yet'}</div></div>` : ''}
   <div class="card" style="padding:0;overflow:hidden;">
     <table class="admin-table" style="width:100%;">
       <thead>
@@ -3379,6 +3414,7 @@ function attachEvents() {
     const cp = app.draft.currentPane;
     cp.widthWhole = e.target.value;
     cp.width = resolveInches(cp.widthWhole, cp.widthFrac);
+    updateFracChipsEnabled('width', !!cp.widthWhole);
   });
   on('pane-width-whole', 'change', e => {
     const cp = app.draft.currentPane;
@@ -3390,6 +3426,7 @@ function attachEvents() {
     const cp = app.draft.currentPane;
     cp.heightWhole = e.target.value;
     cp.height = resolveInches(cp.heightWhole, cp.heightFrac);
+    updateFracChipsEnabled('height', !!cp.heightWhole);
   });
   on('pane-height-whole', 'change', e => {
     const cp = app.draft.currentPane;
@@ -3476,6 +3513,10 @@ function attachEvents() {
   delegate('[data-admin-round]', 'click', async e => {
     await saveConfig({ round_increment: parseInt(e.currentTarget.dataset.adminRound) });
     render();
+  });
+  on('admin-min-job-cost', 'change', async e => {
+    const v = parseFloat(e.target.value);
+    if (!isNaN(v) && v >= 0) { await saveConfig({ min_job_cost: v }); render(); }
   });
   on('admin-mult-default', 'change', async e => {
     const v = parseFloat(e.target.value);
@@ -3887,6 +3928,10 @@ function attachEvents() {
 
   // ---- ADMIN ----
   on('back-home-admin', 'click', () => navigate('home'));
+  on('admin-quote-search', 'input', e => {
+    app.adminQuoteSearch = e.target.value;
+    render();
+  });
   delegate('[data-tab]', 'click', e => {
     app.activeTab = parseInt(e.currentTarget.dataset.tab);
     app.editMode = null;
