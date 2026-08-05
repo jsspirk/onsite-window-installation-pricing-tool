@@ -1353,6 +1353,37 @@ function saveState(state) {
   } catch (e) { console.warn('Storage write failed', e); }
 }
 
+// Quote writes that couldn't reach Supabase (offline, or a failed request
+// despite isOnline saying true) are queued here, keyed by quote id so
+// repeated edits to the same quote just replace the pending entry rather
+// than piling up stale intermediate versions.
+function loadPendingSync() {
+  try {
+    const s = localStorage.getItem('fg_pending_sync');
+    return s ? JSON.parse(s) : {};
+  } catch { return {}; }
+}
+
+function savePendingSync(queue) {
+  try {
+    localStorage.setItem('fg_pending_sync', JSON.stringify(queue));
+  } catch (e) { console.warn('Pending sync storage write failed', e); }
+}
+
+function queuePendingSync(quote, panes) {
+  const queue = loadPendingSync();
+  queue[quote.id] = { quote, panes };
+  savePendingSync(queue);
+}
+
+function unqueuePendingSync(id) {
+  const queue = loadPendingSync();
+  if (queue[id]) {
+    delete queue[id];
+    savePendingSync(queue);
+  }
+}
+
 function initState() {
   const saved = loadState();
   if (saved) return { ...saved, quotes: [] }; // quotes now come from Supabase
@@ -1599,8 +1630,9 @@ async function loadQuotes() {
   } catch {}
 }
 
-async function syncQuoteToSupabase(quote, panes) {
-  if (!app.isOnline) { saveState(appData); return; }
+// The actual network write. Throws on any failure so callers can decide
+// whether to retry immediately or queue for later.
+async function doSyncQuote(quote, panes) {
   const quoteRow = {
     id:               quote.id,
     tech_id:          quote.techId,
@@ -1644,9 +1676,49 @@ async function syncQuoteToSupabase(quote, panes) {
     unit_type:    p.unitType    || 'double_pane',
   }));
   const { error } = await sb.from('quotes').upsert(quoteRow);
-  if (!error) {
-    await sb.from('panes').delete().eq('quote_id', quote.id);
-    if (paneRows.length > 0) await sb.from('panes').insert(paneRows);
+  if (error) throw error;
+  const { error: delError } = await sb.from('panes').delete().eq('quote_id', quote.id);
+  if (delError) throw delError;
+  if (paneRows.length > 0) {
+    const { error: insError } = await sb.from('panes').insert(paneRows);
+    if (insError) throw insError;
+  }
+}
+
+// Public entry point for persisting a quote. Queues the write instead of
+// losing it whenever the network isn't actually reachable — either because
+// we're offline, or because isOnline said true but the request failed
+// anyway (weak signal, captive portal, etc).
+async function syncQuoteToSupabase(quote, panes) {
+  saveState(appData);
+  if (!app.isOnline) {
+    queuePendingSync(quote, panes);
+    return;
+  }
+  try {
+    await doSyncQuote(quote, panes);
+    unqueuePendingSync(quote.id);
+  } catch (e) {
+    console.warn('Sync failed, queued for retry', e);
+    queuePendingSync(quote, panes);
+  }
+}
+
+// Replays any writes that couldn't reach Supabase earlier. Must be awaited
+// before loadQuotes() pulls server state, or a reconnect would silently
+// overwrite this device's own unsynced local changes.
+async function flushPendingSync() {
+  if (!app.isOnline) return;
+  const queue = loadPendingSync();
+  for (const id of Object.keys(queue)) {
+    const { quote, panes } = queue[id];
+    try {
+      await doSyncQuote(quote, panes);
+      unqueuePendingSync(id);
+    } catch (e) {
+      console.warn('Flush failed for quote', id, e);
+      // left queued — will retry on the next flush
+    }
   }
 }
 
@@ -3960,6 +4032,7 @@ async function handleLogin() {
 
   await loadConfig();
   applyBranding();
+  await flushPendingSync();
   await loadQuotes();
   navigate('home');
 }
@@ -4073,7 +4146,7 @@ async function deleteAdminQuote(quoteId) {
 window.addEventListener('online', () => {
   app.isOnline = true;
   appData.lastSync = new Date().toISOString();
-  if (app.currentUser) loadQuotes().then(render);
+  if (app.currentUser) flushPendingSync().then(loadQuotes).then(render);
   else render();
 });
 window.addEventListener('offline', () => {
@@ -4104,7 +4177,10 @@ async function init() {
   }
   await loadConfig();
   applyBranding();
-  if (app.currentUser) await loadQuotes();
+  if (app.currentUser) {
+    await flushPendingSync();
+    await loadQuotes();
+  }
   render();
 }
 
