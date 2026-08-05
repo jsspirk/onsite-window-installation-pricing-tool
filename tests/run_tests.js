@@ -35,7 +35,6 @@ const localStorage = {
 const PRICE_CATALOG = {
   version: '2026-07-14',
   laborRates: { 1: 150, 2: 200 },
-  sellMultiplier: 3,
   suppliers: {
     busick:    { name: 'Busick',    markup: 1.25,  gridAdder: 5.00  },
     glaz_tech: { name: 'Glaz-Tech', markup: 1.275, gridAdder: 3.75  },
@@ -96,13 +95,25 @@ const PRICE_CATALOG = {
   },
 };
 
-const appConfig = { mult_default: 3, mult_threshold: null, mult_high: 2 };
+const appConfig = { markup_tiers: null, round_increment: 25 };
 
-function getSellMultiplier(glassCost) {
-  const def  = appConfig.mult_default   ?? PRICE_CATALOG.sellMultiplier;
-  const thr  = appConfig.mult_threshold ?? null;
-  const high = appConfig.mult_high      ?? 2;
-  return (thr && glassCost > thr) ? high : def;
+const DEFAULT_MARKUP_TIERS = [
+  { id: 1, name: 'Standard',  maxCost: 150,  multiplier: 3.00 },
+  { id: 2, name: 'Large',     maxCost: 300,  multiplier: 2.75 },
+  { id: 3, name: 'Oversized', maxCost: null, multiplier: 2.50 },
+];
+
+function getMarkupTier(glassCost, tiers) {
+  const sorted = [...tiers].sort((a, b) => {
+    if (a.maxCost === null) return 1;
+    if (b.maxCost === null) return -1;
+    return a.maxCost - b.maxCost;
+  });
+  return sorted.find(t => t.maxCost === null || glassCost <= t.maxCost) || sorted[sorted.length - 1];
+}
+
+function roundToIncrement(n, inc) {
+  return Math.round(n / inc) * inc;
 }
 
 function calcPaneWeight(pane) {
@@ -173,27 +184,30 @@ function calcPane(pane, supplier) {
   const crewSize       = isHeavyLift(pane) ? 2 : 1;
   const laborRate      = PRICE_CATALOG.laborRates[crewSize];
   const laborCost      = laborHrs * laborRate;
-  const sellMult       = getSellMultiplier(glassCost);
+  const sellMult       = getMarkupTier(glassCost, appConfig.markup_tiers || DEFAULT_MARKUP_TIERS).multiplier;
   const productCost    = +(glassCost * sellMult * qty + customGridFlat * qty).toFixed(2);
-  const laborTotal     = +(laborCost * qty).toFixed(2);
+  const laborTotal     = +laborCost.toFixed(2); // laborHrs is the total for this line, not per-unit
   const lineTotal      = +(productCost + laborTotal).toFixed(2);
+  const roundedTotal   = roundToIncrement(lineTotal, appConfig.round_increment || 25);
 
-  return { sqft: +(SF * qty).toFixed(4), productCost, laborCost: laborTotal, materialsCost: 0, lineTotal, requiresQuote: false, gridMode, weight: calcPaneWeight(pane), crewSize };
+  return { sqft: +(SF * qty).toFixed(4), productCost, laborCost: laborTotal, materialsCost: 0, lineTotal, roundedTotal, requiresQuote: false, gridMode, weight: calcPaneWeight(pane), crewSize };
 }
 
-function calcJob(panes, supplier) {
-  let totalProduct = 0, totalLabor = 0;
+function calcJob(panes, supplier, opts = {}) {
+  let totalProduct = 0, totalLabor = 0, totalRounded = 0;
   panes.forEach(p => {
     const r = calcPane(p, supplier);
     if (!r || r.requiresQuote) return;
     totalProduct += r.productCost;
     totalLabor   += r.laborCost;
+    totalRounded += r.roundedTotal;
   });
+  const grandTotal = opts.rounded ? totalRounded : (totalProduct + totalLabor);
   return {
     totalProduct:   +totalProduct.toFixed(2),
     totalLabor:     +totalLabor.toFixed(2),
     totalMaterials: 0,
-    grandTotal:     +(totalProduct + totalLabor).toFixed(2),
+    grandTotal:     +grandTotal.toFixed(2),
   };
 }
 
@@ -387,7 +401,9 @@ test('grid="standard" → Busick gridAdder (+$5.00/SF) added to rate', () => {
   const std    = calcPane(pane({ grid: 'standard', width: 24, height: 36 }), 'busick');
   const SF = (24 * 36) / 144;
   const sup = PRICE_CATALOG.suppliers.busick;
-  const expectedDiff = +(SF * sup.gridAdder * sup.markup * PRICE_CATALOG.sellMultiplier).toFixed(2);
+  const rawRate = PRICE_CATALOG.rates.busick['1/8"'].clear_ann;
+  const mult = getMarkupTier(SF * (rawRate + sup.gridAdder) * sup.markup, DEFAULT_MARKUP_TIERS).multiplier;
+  const expectedDiff = +(SF * sup.gridAdder * sup.markup * mult).toFixed(2);
   assert.ok(
     Math.abs((std.productCost - noGrid.productCost) - expectedDiff) < 0.01,
     `Grid adder diff should be ~${expectedDiff}, got ${(std.productCost - noGrid.productCost).toFixed(2)}`
@@ -444,9 +460,9 @@ test('calcPane defaults to 1.0 hr when laborHrs is missing (backward compat)', (
   assert.strictEqual(r.laborCost, 150.00);
 });
 
-test('laborHrs scales with qty', () => {
+test('laborHrs is the total for the line, not multiplied by qty', () => {
   const r = calcPane(pane({ laborHrs: 1.0, qty: 3 }), 'busick');
-  assert.strictEqual(r.laborCost, 450.00);
+  assert.strictEqual(r.laborCost, 150.00);
 });
 
 test('calcPane accepts no difficulty argument (does not throw)', () => {
@@ -742,19 +758,24 @@ test('FRAC_OPTS values are in ascending order', () => {
 
 section('L. Flat sell multiplier (3×) + supplier markup');
 
-test('productCost = SF × rawRate × markup × 3 for standard pane', () => {
-  // 24×36 clear ann Busick: SF=6, rate=7.72, markup=1.25 → companyCost=57.90, sell=173.70
+test('productCost = SF × rawRate × markup × tier multiplier for standard pane', () => {
+  // 24×36 clear ann Busick: SF=6, rate=7.72, markup=1.25 → glassCost=57.90 → tier 1 (3.00×)
   const r = calcPane(pane({ width: 24, height: 36, coating: 'clear', finish: 'annealed', grid: 'none' }), 'busick');
   const SF = (24 * 36) / 144;
-  const expected = +(SF * 7.72 * 1.25 * 3).toFixed(2);
+  const glassCost = SF * 7.72 * 1.25;
+  const mult = getMarkupTier(glassCost, DEFAULT_MARKUP_TIERS).multiplier;
+  const expected = +(glassCost * mult).toFixed(2);
   assert.ok(Math.abs(r.productCost - expected) < 0.01, `Expected ${expected}, got ${r.productCost}`);
 });
 
-test('flat 3× applies to large pane (no tier reduction)', () => {
-  // 48×84 c270 ann Busick: SF=28, rate=12.01, markup=1.25 — previously fell in Oversized tier (2.5×), now 3×
+test('large/costly pane gets a reduced tier multiplier (Oversized, 2.50×)', () => {
+  // 48×84 c270 ann Busick: SF=28, rate=12.01, markup=1.25 → glassCost=420.35 → above $300, tier 3 (2.50×)
   const r = calcPane(pane({ width: 48, height: 84, coating: 'c270', finish: 'annealed', grid: 'none' }), 'busick');
   const SF = (48 * 84) / 144;
-  const expected = +(SF * 12.01 * 1.25 * 3).toFixed(2);
+  const glassCost = SF * 12.01 * 1.25;
+  const mult = getMarkupTier(glassCost, DEFAULT_MARKUP_TIERS).multiplier;
+  assert.strictEqual(mult, 2.50, `Expected Oversized tier (2.50×) for glassCost ${glassCost.toFixed(2)}, got ${mult}×`);
+  const expected = +(glassCost * mult).toFixed(2);
   assert.ok(Math.abs(r.productCost - expected) < 0.01, `Expected ${expected}, got ${r.productCost}`);
 });
 
@@ -769,7 +790,9 @@ test('ROM SELL-AT reference: 1/8" Clear Ann Busick matches cost calc formula', (
   // 43×47 ≈ 14.04 SF — close enough to verify formula direction
   const r = calcPane(pane({ width: 43, height: 47, coating: 'clear', finish: 'annealed', grid: 'none', laborHrs: 1.0 }), 'busick');
   const SF = (43 * 47) / 144;
-  const expectedProduct = +(SF * 7.72 * 1.25 * 3).toFixed(2);
+  const glassCost = SF * 7.72 * 1.25;
+  const mult = getMarkupTier(glassCost, DEFAULT_MARKUP_TIERS).multiplier;
+  const expectedProduct = +(glassCost * mult).toFixed(2);
   assert.ok(Math.abs(r.productCost - expectedProduct) < 0.01, `Expected ${expectedProduct}, got ${r.productCost}`);
 });
 
@@ -778,7 +801,9 @@ test('grid adder is multiplied by supplier markup and sell multiplier', () => {
   const std    = calcPane(pane({ width: 24, height: 36, grid: 'standard' }), 'busick');
   const SF = (24 * 36) / 144;
   const sup = PRICE_CATALOG.suppliers.busick;
-  const expectedDiff = +(SF * sup.gridAdder * sup.markup * PRICE_CATALOG.sellMultiplier).toFixed(2);
+  const rawRate = PRICE_CATALOG.rates.busick['1/8"'].clear_ann;
+  const mult = getMarkupTier(SF * (rawRate + sup.gridAdder) * sup.markup, DEFAULT_MARKUP_TIERS).multiplier;
+  const expectedDiff = +(SF * sup.gridAdder * sup.markup * mult).toFixed(2);
   assert.ok(Math.abs((std.productCost - noGrid.productCost) - expectedDiff) < 0.01,
     `Grid diff should be ${expectedDiff}, got ${(std.productCost - noGrid.productCost).toFixed(2)}`);
 });
@@ -864,9 +889,16 @@ test('triple pane + grid doubles the grid adder (2 air spaces)', () => {
   const withoutGrid = calcPane(pane({ unitType: 'triple_pane', grid: 'none',     width: 24, height: 36 }), 'busick');
   const SF = (24 * 36) / 144;
   const sup = PRICE_CATALOG.suppliers.busick;
+  const rawRate = PRICE_CATALOG.rates.busick['1/8"'].clear_ann;
   // TP shapeMult = standard(1.0) × 1.75; grid adder is doubled for TP (2 air spaces)
   const tpShapeMult = 1.0 * 1.75;
-  const expectedGridDiff = +(SF * (sup.gridAdder * 2) * tpShapeMult * sup.markup * PRICE_CATALOG.sellMultiplier).toFixed(2);
+  // Grid pushes glassCost into a higher pricing tier here, so each side needs its own
+  // tier multiplier — a single shared-multiplier diff formula no longer holds.
+  const glassCostNoGrid = SF * rawRate * tpShapeMult * sup.markup;
+  const glassCostGrid   = SF * (rawRate + sup.gridAdder * 2) * tpShapeMult * sup.markup;
+  const multNoGrid = getMarkupTier(glassCostNoGrid, DEFAULT_MARKUP_TIERS).multiplier;
+  const multGrid   = getMarkupTier(glassCostGrid, DEFAULT_MARKUP_TIERS).multiplier;
+  const expectedGridDiff = +((glassCostGrid * multGrid) - (glassCostNoGrid * multNoGrid)).toFixed(2);
   assert.ok(
     Math.abs((withGrid.productCost - withoutGrid.productCost) - expectedGridDiff) < 0.01,
     `Triple pane grid diff should be ${expectedGridDiff}, got ${(withGrid.productCost - withoutGrid.productCost).toFixed(2)}`
@@ -878,7 +910,9 @@ test('standard shape grid adder is NOT doubled', () => {
   const withoutGrid = calcPane(pane({ shape: 'standard', grid: 'none',     width: 24, height: 36 }), 'busick');
   const SF = (24 * 36) / 144;
   const sup = PRICE_CATALOG.suppliers.busick;
-  const expectedGridDiff = +(SF * sup.gridAdder * 1.0 * sup.markup * PRICE_CATALOG.sellMultiplier).toFixed(2);
+  const rawRate = PRICE_CATALOG.rates.busick['1/8"'].clear_ann;
+  const mult = getMarkupTier(SF * (rawRate + sup.gridAdder) * 1.0 * sup.markup, DEFAULT_MARKUP_TIERS).multiplier;
+  const expectedGridDiff = +(SF * sup.gridAdder * 1.0 * sup.markup * mult).toFixed(2);
   assert.ok(
     Math.abs((withGrid.productCost - withoutGrid.productCost) - expectedGridDiff) < 0.01,
     `Standard grid diff should be ${expectedGridDiff}, got ${(withGrid.productCost - withoutGrid.productCost).toFixed(2)}`
@@ -914,7 +948,9 @@ test('SP uses looseLiteRates (not IG rates)', () => {
   const r = calcPane(pane({ unitType: 'single_pane', coating: 'clear', finish: 'annealed', thickness: '1/8"', width: 24, height: 36 }), 'glaz_tech');
   const SF = (24 * 36) / 144;
   const sup = PRICE_CATALOG.suppliers.glaz_tech;
-  const expected = +(SF * 3.96 * sup.markup * PRICE_CATALOG.sellMultiplier).toFixed(2);
+  const glassCost = SF * 3.96 * sup.markup;
+  const mult = getMarkupTier(glassCost, DEFAULT_MARKUP_TIERS).multiplier;
+  const expected = +(glassCost * mult).toFixed(2);
   assert.ok(!r.requiresQuote, 'SP clear ann glaz_tech should price successfully');
   assert.ok(Math.abs(r.productCost - expected) < 0.01, `Expected ${expected}, got ${r.productCost}`);
 });
@@ -978,6 +1014,87 @@ test('TP grid adder doubles vs DP for same pane', () => {
   const dpGridCost = dpGrid.productCost - dpNone.productCost;
   const tpGridCost = tpGrid.productCost - tpNone.productCost;
   assert.ok(tpGridCost > dpGridCost, `TP grid cost (${tpGridCost}) should exceed DP grid cost (${dpGridCost})`);
+});
+
+// ─── O. Tiered multipliers ────────────────────────────────────────────────────
+
+section('O. Tiered multipliers');
+
+test('getMarkupTier: glassCost at tier 1 boundary ($150) uses tier 1 (3.00×)', () => {
+  assert.strictEqual(getMarkupTier(150, DEFAULT_MARKUP_TIERS).multiplier, 3.00);
+});
+test('getMarkupTier: glassCost just above tier 1 boundary uses tier 2 (2.75×)', () => {
+  assert.strictEqual(getMarkupTier(150.01, DEFAULT_MARKUP_TIERS).multiplier, 2.75);
+});
+test('getMarkupTier: glassCost at tier 2 boundary ($300) uses tier 2 (2.75×)', () => {
+  assert.strictEqual(getMarkupTier(300, DEFAULT_MARKUP_TIERS).multiplier, 2.75);
+});
+test('getMarkupTier: glassCost just above tier 2 boundary uses tier 3 (2.50×)', () => {
+  assert.strictEqual(getMarkupTier(300.01, DEFAULT_MARKUP_TIERS).multiplier, 2.50);
+});
+test('getMarkupTier: very high glassCost still falls in the uncapped last tier', () => {
+  assert.strictEqual(getMarkupTier(50000, DEFAULT_MARKUP_TIERS).multiplier, 2.50);
+});
+test('calcPane applies a lower multiplier to a costlier pane (higher tier)', () => {
+  const small = calcPane(pane({ width: 12, height: 12, coating: 'clear', finish: 'annealed', grid: 'none' }), 'busick');
+  const large = calcPane(pane({ width: 96, height: 96, coating: 'clear', finish: 'annealed', grid: 'none' }), 'busick');
+  const rawRate = PRICE_CATALOG.rates.busick['1/8"'].clear_ann;
+  const sup = PRICE_CATALOG.suppliers.busick;
+  const glassCostSmall = ((12 * 12) / 144) * rawRate * sup.markup;
+  const glassCostLarge = ((96 * 96) / 144) * rawRate * sup.markup;
+  const multSmall = getMarkupTier(glassCostSmall, DEFAULT_MARKUP_TIERS).multiplier;
+  const multLarge = getMarkupTier(glassCostLarge, DEFAULT_MARKUP_TIERS).multiplier;
+  assert.ok(multLarge < multSmall, `Costlier pane should get a lower tier multiplier (small=${multSmall}, large=${multLarge})`);
+  assert.ok(Math.abs(small.productCost - glassCostSmall * multSmall) < 0.01, 'small pane productCost should use tier 1');
+  assert.ok(Math.abs(large.productCost - glassCostLarge * multLarge) < 0.01, 'large pane productCost should use its own tier');
+});
+test('admin-configured markup_tiers override DEFAULT_MARKUP_TIERS', () => {
+  appConfig.markup_tiers = [{ id: 1, name: 'Flat', maxCost: null, multiplier: 4.0 }];
+  const r = calcPane(pane({ width: 24, height: 36, coating: 'clear', finish: 'annealed', grid: 'none' }), 'busick');
+  const rawRate = PRICE_CATALOG.rates.busick['1/8"'].clear_ann;
+  const sup = PRICE_CATALOG.suppliers.busick;
+  const glassCost = ((24 * 36) / 144) * rawRate * sup.markup;
+  assert.ok(Math.abs(r.productCost - glassCost * 4.0) < 0.01, 'flat 4.0x admin override should apply');
+  appConfig.markup_tiers = null;
+});
+
+// ─── P. Per-pane rounding ──────────────────────────────────────────────────────
+
+section('P. Per-pane rounding');
+
+test('roundToIncrement rounds to nearest $25 by default', () => {
+  assert.strictEqual(roundToIncrement(412, 25), 400);
+  assert.strictEqual(roundToIncrement(413, 25), 425);
+  assert.strictEqual(roundToIncrement(437.5, 25), 450);
+});
+test('roundToIncrement respects a custom increment', () => {
+  assert.strictEqual(roundToIncrement(462, 50), 450);
+  assert.strictEqual(roundToIncrement(480, 50), 500);
+});
+test('calcPane roundedTotal rounds lineTotal to the configured increment', () => {
+  const r = calcPane(pane({ width: 24, height: 36 }), 'busick');
+  assert.strictEqual(r.roundedTotal, roundToIncrement(r.lineTotal, appConfig.round_increment || 25));
+});
+test('calcJob default (unrounded) sums raw lineTotal — estimating screens are unaffected by rounding', () => {
+  const panes = [pane({ width: 24, height: 36 }), pane({ width: 30, height: 40 })];
+  const job = calcJob(panes, 'busick');
+  const raw = panes.reduce((s, p) => s + calcPane(p, 'busick').lineTotal, 0);
+  assert.ok(Math.abs(job.grandTotal - raw) < 0.02, 'Unrounded grandTotal should equal sum of raw lineTotals');
+});
+test('calcJob({rounded:true}) sums each roundedTotal instead of raw lineTotal', () => {
+  const panes = [pane({ width: 24, height: 36 }), pane({ width: 30, height: 40 })];
+  const job = calcJob(panes, 'busick', { rounded: true });
+  const roundedSum = panes.reduce((s, p) => s + calcPane(p, 'busick').roundedTotal, 0);
+  assert.strictEqual(job.grandTotal, +roundedSum.toFixed(2));
+});
+test('rounded and unrounded grandTotal can legitimately differ for the same panes', () => {
+  const panes = [pane({ width: 17, height: 23 })];
+  const r = calcPane(panes[0], 'busick');
+  if (r.lineTotal !== r.roundedTotal) {
+    const rawJob     = calcJob(panes, 'busick');
+    const roundedJob = calcJob(panes, 'busick', { rounded: true });
+    assert.notStrictEqual(rawJob.grandTotal, roundedJob.grandTotal);
+  }
 });
 
 // ─── Summary ─────────────────────────────────────────────────────────────────

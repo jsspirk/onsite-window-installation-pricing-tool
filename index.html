@@ -1170,7 +1170,6 @@ const MAX_PANE_SIZE_IN = 120; // inches — trigger large-pane warning
 const PRICE_CATALOG = {
   version: '2026-07-16',
   laborRates: { 1: 150, 2: 200 },  // crew-hour rates: 1-tech=$150/hr, 2-tech=$200/hr
-  sellMultiplier: 3,         // sell = companyCost × 3 (per COST CALCULATOR 2.27.2026)
   suppliers: {
     busick:    { name: 'Busick',    markup: 1.25,  gridAdder: 5.00  },
     glaz_tech: { name: 'Glaz-Tech', markup: 1.275, gridAdder: 3.75  },
@@ -1398,9 +1397,6 @@ let appConfig = {
   round_increment:       25,
   min_job_cost:          400,
   markup_tiers:          null,
-  mult_default:          3,
-  mult_threshold:        null,
-  mult_high:             2,
 };
 
 /* ================================================================
@@ -1453,9 +1449,9 @@ function calcPane(pane, supplier) {
   const crewSize       = isHeavyLift(pane) ? 2 : 1;
   const laborRate      = PRICE_CATALOG.laborRates[crewSize];
   const laborCost      = laborHrs * laborRate;
-  const sellMult       = getSellMultiplier(glassCost);
+  const sellMult       = getMarkupTier(glassCost, appConfig.markup_tiers || DEFAULT_MARKUP_TIERS).multiplier;
   const productCost    = +(glassCost * sellMult * qty + customGridFlat * qty).toFixed(2);
-  const laborTotal     = +(laborCost * qty).toFixed(2);
+  const laborTotal     = +laborCost.toFixed(2); // laborHrs is the total for this line, not per-unit
   const lineTotal      = +(productCost + laborTotal).toFixed(2);
 
   return {
@@ -1464,6 +1460,7 @@ function calcPane(pane, supplier) {
     laborCost:     laborTotal,
     materialsCost: 0,
     lineTotal,
+    roundedTotal:  roundToIncrement(lineTotal, appConfig.round_increment || 25),
     requiresQuote: false,
     gridMode,
     weight:        calcPaneWeight(pane),
@@ -1471,16 +1468,28 @@ function calcPane(pane, supplier) {
   };
 }
 
-function calcJob(panes, supplier) {
-  let totalProduct = 0, totalLabor = 0;
+// Rounds to the nearest increment (e.g. nearest $25) — used for the single
+// per-pane price shown once a quote moves past estimating into invoicing.
+function roundToIncrement(n, inc) {
+  return Math.round(n / inc) * inc;
+}
+
+// opts.rounded: false (default) sums each pane's raw lineTotal for grandTotal,
+// matching the estimating-screens behavior (steps 1-3) exactly as before.
+// true sums each pane's roundedTotal instead — used once a quote is presented
+// to the customer or has been sent, so line items are shown as single rounded
+// prices and the job range is built from that rounded sum.
+function calcJob(panes, supplier, opts = {}) {
+  let totalProduct = 0, totalLabor = 0, totalRounded = 0;
   const lineItems = panes.map(p => {
     const r = calcPane(p, supplier);
     if (!r || r.requiresQuote) return null;
     totalProduct += r.productCost;
     totalLabor   += r.laborCost;
+    totalRounded += r.roundedTotal;
     return { ...p, ...r };
   }).filter(Boolean);
-  const grandTotal = totalProduct + totalLabor;
+  const grandTotal = opts.rounded ? totalRounded : (totalProduct + totalLabor);
   return {
     lineItems,
     totalProduct:   +totalProduct.toFixed(2),
@@ -1679,13 +1688,6 @@ function fmtRangeCustomer(n) {
   const low  = Math.floor(Math.max(floor, n * (1 - band)) / inc) * inc;
   const high = Math.floor(n * (1 + band) / inc) * inc;
   return `${fmt(low)} \u2013 ${fmt(high)}`;
-}
-
-function getSellMultiplier(glassCost) {
-  const def  = appConfig.mult_default   ?? PRICE_CATALOG.sellMultiplier;
-  const thr  = appConfig.mult_threshold ?? null;
-  const high = appConfig.mult_high      ?? 2;
-  return (thr && glassCost > thr) ? high : def;
 }
 
 function fmtDate(iso) {
@@ -2330,13 +2332,15 @@ function renderNewQuoteStep1() {
 
         // ── Install Time ────────────────────────────────────────────
         const laborHrs   = cp.laborHrs || 1.0;
+        const paneQty    = cp.qty || 1;
         const crewRate   = heavy ? PRICE_CATALOG.laborRates[2] : PRICE_CATALOG.laborRates[1];
+        const qtyHint    = paneQty > 1 ? ` <span style="text-transform:none;font-weight:400;color:var(--text-2);">— total hours to install all ${paneQty} at this location</span>` : '';
         const flagLabel  = heavy ? ` <span style="font-size:11px;font-weight:700;color:var(--orange);letter-spacing:0.5px;text-transform:uppercase;">· 2-Tech · $${PRICE_CATALOG.laborRates[2]}/hr</span>` : '';
         const billedLine = heavy ? `
       <div style="margin-top:6px;font-size:13px;color:var(--text-2);">2-tech crew rate · <span style="color:var(--text-1);font-weight:600;">$${PRICE_CATALOG.laborRates[2]}/hr</span><span style="color:var(--text-3);"> vs. $${PRICE_CATALOG.laborRates[1]}/hr for 1-tech</span></div>` : '';
 
         return `${weightSection}${floorSection}
-      <div class="section-label mb-8">Install Time${flagLabel}</div>
+      <div class="section-label mb-8">Total Install Time${qtyHint}${flagLabel}</div>
       <div class="qty-stepper" style="max-width:190px;">
         <button class="qty-btn" id="labor-dec">−</button>
         <span class="qty-val" id="labor-val">${laborHrs.toFixed(2)} hr</span>
@@ -2847,9 +2851,6 @@ function renderAdminLabor() {
   const rangeBand       = String(appConfig.range_band ?? 0.08);
   const roundIncrement  = String(appConfig.round_increment ?? 25);
   const minJobCost      = appConfig.min_job_cost ?? 400;
-  const multDefault     = appConfig.mult_default   ?? 3;
-  const multThreshold   = appConfig.mult_threshold ?? '';
-  const multHigh        = appConfig.mult_high      ?? 2;
   const SUPPLIER_OPTS   = Object.entries(PRICE_CATALOG.suppliers).map(([id,s])=>({id, name:s.name}));
   const BAND_OPTS       = [
     {id:'0.05', label:'±5%'},
@@ -2909,40 +2910,7 @@ function renderAdminLabor() {
     ${ROUND_OPTS.map(r=>`<div class="chip ${roundIncrement===r.id?'active':''}" data-admin-round="${r.id}">${r.label}</div>`).join('')}
   </div>
 
-  <div class="section-label mb-8">Sell Multiplier</div>
-  <div style="font-size:13px;color:var(--text-2);margin-bottom:12px;">Glass sell price = supplier cost × multiplier. Per COST CALCULATOR 2.27.2026.</div>
-  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-    <input id="admin-mult-default" type="number" min="1" max="10" step="0.25"
-      value="${multDefault}"
-      style="width:90px;padding:8px 10px;font-size:20px;font-family:var(--font-title);font-weight:800;color:var(--amber);background:var(--bg-1);border:1.5px solid var(--border-0);border-radius:var(--radius-md);text-align:center;" />
-    <span style="font-size:20px;font-weight:700;color:var(--amber);">×</span>
-    <span style="font-size:13px;color:var(--text-3);">default, applied to all jobs</span>
-  </div>
-
-  <div class="section-label mb-8">High-Cost Threshold (optional)</div>
-  <div style="font-size:13px;color:var(--text-2);margin-bottom:12px;">When glass cost exceeds the threshold, apply a lower multiplier. Leave blank to use the default on all jobs.</div>
-  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
-    <div style="flex:1;min-width:140px;">
-      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Glass cost threshold ($)</div>
-      <input id="admin-mult-threshold" type="number" min="0" step="100" placeholder="e.g. 1000"
-        value="${multThreshold}"
-        style="width:100%;padding:8px 10px;font-size:15px;color:var(--text-0);background:var(--bg-1);border:1.5px solid var(--border-0);border-radius:var(--radius-md);" />
-    </div>
-    <div style="flex:1;min-width:120px;">
-      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Multiplier above threshold</div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <input id="admin-mult-high" type="number" min="1" max="10" step="0.25"
-          value="${multHigh}"
-          style="width:80px;padding:8px 10px;font-size:15px;color:var(--text-0);background:var(--bg-1);border:1.5px solid var(--border-0);border-radius:var(--radius-md);text-align:center;" />
-        <span style="font-size:15px;font-weight:700;color:var(--amber);">×</span>
-      </div>
-    </div>
-  </div>
-  ${multThreshold
-    ? `<div style="padding:10px 14px;background:var(--bg-2);border:1px solid var(--border-0);border-radius:var(--radius-md);font-size:13px;color:var(--text-1);">
-         Active: glass cost ≤ $${fmt(Number(multThreshold))} → ${multDefault}×&nbsp;&nbsp;·&nbsp;&nbsp;glass cost > $${fmt(Number(multThreshold))} → ${multHigh}×
-       </div>`
-    : `<div style="font-size:13px;color:var(--text-3);">No threshold set — all jobs use ${multDefault}×.</div>`}
+  ${renderAdminPricingTiers()}
 </div>`;
 }
 
@@ -2967,7 +2935,8 @@ function renderAdminMaterials() {
     <div style="font-size:13px;color:var(--text-2);line-height:2.0;font-family:monospace;">
       <div>SF = (width × height) / 144</div>
       <div>glassCost = SF × (rawRate + gridAdder) × shapeMult × supplierMarkup</div>
-      <div>paneTotal = glassCost × ${PRICE_CATALOG.sellMultiplier} + laborHrs × laborRate</div>
+      <div>paneTotal = glassCost × tierMultiplier(glassCost) + laborHrs × laborRate</div>
+      <div>tierMultiplier looked up from the Pricing Tiers set on the Labor &amp; Pricing tab</div>
       <div>laborRate = $${PRICE_CATALOG.laborRates[1]}/hr (1-tech) or $${PRICE_CATALOG.laborRates[2]}/hr (2-tech crew)</div>
       <div>range = paneTotal × (1 ± band), floor $${appConfig.min_job_cost ?? 400}</div>
     </div>
@@ -2976,45 +2945,47 @@ function renderAdminMaterials() {
 }
 
 function renderAdminPricingTiers() {
-  const multDefault   = appConfig.mult_default   ?? 3;
-  const multThreshold = appConfig.mult_threshold ?? '';
-  const multHigh      = appConfig.mult_high      ?? 2;
+  const tiers = app.draftTiers || appConfig.markup_tiers || DEFAULT_MARKUP_TIERS;
   return `
 <div>
-  <div class="section-label mb-8">Default Sell Multiplier</div>
-  <div style="font-size:13px;color:var(--text-2);margin-bottom:12px;">Glass sell price = supplier cost × multiplier. Per COST CALCULATOR 2.27.2026.</div>
-  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-    <input id="admin-mult-default" type="number" min="1" max="10" step="0.25"
-      value="${multDefault}"
-      style="width:90px;padding:8px 10px;font-size:20px;font-family:var(--font-title);font-weight:800;color:var(--amber);background:var(--bg-1);border:1.5px solid var(--border-0);border-radius:var(--radius-md);text-align:center;" />
-    <span style="font-size:20px;font-weight:700;color:var(--amber);">×</span>
-    <span style="font-size:13px;color:var(--text-3);">applied to all jobs by default</span>
-  </div>
+  <div class="section-label mb-8">Pricing Tiers</div>
+  <div style="font-size:13px;color:var(--text-2);margin-bottom:12px;">Glass sell price = supplier cost × the multiplier for the tier its raw cost falls into. Tiers are checked in ascending order of max cost; the last tier always catches everything above it.</div>
 
-  <div class="section-label mb-8">High-Cost Override (optional)</div>
-  <div style="font-size:13px;color:var(--text-2);margin-bottom:12px;">When glass cost exceeds the threshold, apply a lower multiplier. Leave threshold blank to use the default on all jobs.</div>
-  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
-    <div style="flex:1;min-width:140px;">
-      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Glass cost threshold ($)</div>
-      <input id="admin-mult-threshold" type="number" min="0" step="100" placeholder="e.g. 1000"
-        value="${multThreshold}"
-        style="width:100%;padding:8px 10px;font-size:15px;color:var(--text-0);background:var(--bg-1);border:1.5px solid var(--border-0);border-radius:var(--radius-md);" />
-    </div>
-    <div style="flex:1;min-width:120px;">
-      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Multiplier above threshold</div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <input id="admin-mult-high" type="number" min="1" max="10" step="0.25"
-          value="${multHigh}"
-          style="width:80px;padding:8px 10px;font-size:15px;color:var(--text-0);background:var(--bg-1);border:1.5px solid var(--border-0);border-radius:var(--radius-md);text-align:center;" />
-        <span style="font-size:15px;font-weight:700;color:var(--amber);">×</span>
+  ${tiers.map((t, i) => `
+  <div class="card card-tight mb-8" data-tier-id="${t.id}">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+      <div style="flex:2;min-width:110px;">
+        <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Tier name</div>
+        <input data-tier-name="${t.id}" type="text" value="${t.name}"
+          style="width:100%;padding:8px 10px;font-size:14px;color:var(--text-0);background:var(--bg-1);border:1.5px solid var(--border-0);border-radius:var(--radius-md);" />
       </div>
+      <div style="flex:1;min-width:110px;">
+        <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Max glass cost ($)</div>
+        <input data-tier-maxcost="${t.id}" type="number" min="0" step="10"
+          value="${t.maxCost === null ? '' : t.maxCost}"
+          placeholder="${i === tiers.length - 1 ? 'and above' : 'e.g. 150'}"
+          ${i === tiers.length - 1 ? 'disabled' : ''}
+          style="width:100%;padding:8px 10px;font-size:14px;color:var(--text-0);background:${i === tiers.length - 1 ? 'var(--bg-2)' : 'var(--bg-1)'};border:1.5px solid var(--border-0);border-radius:var(--radius-md);" />
+      </div>
+      <div style="width:90px;">
+        <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">Multiplier</div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input data-tier-mult="${t.id}" type="number" min="0.01" step="0.05"
+            value="${t.multiplier}"
+            style="width:100%;padding:8px 10px;font-size:14px;font-family:var(--font-title);font-weight:800;color:var(--amber);background:var(--bg-1);border:1.5px solid var(--border-0);border-radius:var(--radius-md);text-align:center;" />
+          <span style="font-size:14px;font-weight:700;color:var(--amber);">×</span>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" data-tier-remove="${t.id}"
+        ${tiers.length <= 1 ? 'disabled' : ''}
+        style="padding:8px 12px;color:var(--red);border-color:var(--red);${tiers.length <= 1 ? 'opacity:0.3;' : ''}">🗑</button>
     </div>
+  </div>`).join('')}
+
+  <div style="display:flex;gap:8px;margin-top:12px;">
+    <button class="btn btn-secondary btn-sm" id="tier-add-btn">+ Add Tier</button>
+    <button class="btn btn-primary btn-sm" id="tier-save-btn" style="flex:1;">✓ Save Tiers</button>
   </div>
-  ${multThreshold
-    ? `<div style="padding:10px 14px;background:var(--bg-2);border:1px solid var(--border-0);border-radius:var(--radius-md);font-size:13px;color:var(--text-1);">
-         Active: glass cost ≤ $${fmt(Number(multThreshold))} → ${multDefault}×&nbsp;&nbsp;·&nbsp;&nbsp;glass cost > $${fmt(Number(multThreshold))} → ${multHigh}×
-       </div>`
-    : `<div style="font-size:13px;color:var(--text-3);">No threshold set — all jobs use ${multDefault}×.</div>`}
 </div>`;
 }
 
@@ -3073,7 +3044,8 @@ function renderAdminQuoteLog() {
 function renderQuoteDetail() {
   const d = app.draft;
   if (!d) return '';
-  const jobCalc = calcJob(d.panes, d.supplier);
+  const isRounded = d.status !== 'draft';
+  const jobCalc = calcJob(d.panes, d.supplier, { rounded: isRounded });
   const statusMap = { sent: 'badge-sent', draft: 'badge-draft', flagged: 'badge-flagged', shown: 'badge-shown' };
 
   return `
@@ -3127,7 +3099,7 @@ function renderQuoteDetail() {
         <div class="price-row"><span class="price-row-label" style="font-size:13px;">Labor (${(p.laborHrs ?? 1.0).toFixed(2)} hr${r && !r.requiresQuote && r.crewSize > 1 ? ' · 2-tech crew' : ''})</span><span class="price-row-value" style="font-size:14px;">${r && !r.requiresQuote ? fmt(r.laborCost) : '—'}</span></div>
         <div class="price-row" style="margin-top:4px;">
           <span class="price-row-label" style="font-size:13px;font-weight:600;color:var(--text-1);">Pane Estimate</span>
-          <span class="price-row-value" style="font-size:15px;color:var(--amber);font-weight:700;">${r && !r.requiresQuote ? fmtRange(r.lineTotal) : '—'}</span>
+          <span class="price-row-value" style="font-size:15px;color:var(--amber);font-weight:700;">${r && !r.requiresQuote ? (isRounded ? fmt(r.roundedTotal) : fmtRange(r.lineTotal)) : '—'}</span>
         </div>
       </div>`;
     }).join('')}
@@ -3281,7 +3253,7 @@ function renderCustomerView(quoteId) {
   let q, jobCalc;
   if (quoteId === '__draft__' && app.draft) {
     const d = app.draft;
-    jobCalc = calcJob(d.panes, d.supplier);
+    jobCalc = calcJob(d.panes, d.supplier, { rounded: true });
     q = {
       customerName: d.customerName,
       customerContact: d.customerContact,
@@ -3518,20 +3490,6 @@ function attachEvents() {
     const v = parseFloat(e.target.value);
     if (!isNaN(v) && v >= 0) { await saveConfig({ min_job_cost: v }); render(); }
   });
-  on('admin-mult-default', 'change', async e => {
-    const v = parseFloat(e.target.value);
-    if (!isNaN(v) && v > 0) { await saveConfig({ mult_default: v }); render(); }
-  });
-  on('admin-mult-threshold', 'change', async e => {
-    const raw = e.target.value.trim();
-    await saveConfig({ mult_threshold: raw ? parseFloat(raw) : null });
-    render();
-  });
-  on('admin-mult-high', 'change', async e => {
-    const v = parseFloat(e.target.value);
-    if (!isNaN(v) && v > 0) { await saveConfig({ mult_high: v }); render(); }
-  });
-
   // ---- BRANDING ----
   on('brand-name-save', 'click', async () => {
     const val = document.getElementById('brand-name-input')?.value.trim() || 'FastGlass';
@@ -3637,6 +3595,10 @@ function attachEvents() {
       const maxCost = maxCostRaw === '' ? null : parseFloat(maxCostRaw);
       tiers.push({ id, name, maxCost, multiplier: +multiplier.toFixed(4) });
     }
+    if (tiers.filter(t => t.maxCost === null).length > 1) {
+      alert('Only one tier can be uncapped ("and above") — give the others a max glass cost.');
+      return;
+    }
     tiers.sort((a, b) => {
       if (a.maxCost === null) return 1;
       if (b.maxCost === null) return -1;
@@ -3703,7 +3665,7 @@ function attachEvents() {
 
       if (d.isAdminEdit) {
         // Recalculate totals and sync, then return to quote detail
-        const jobCalc = calcJob(d.panes, d.supplier);
+        const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' });
         d.totalProduct   = jobCalc.totalProduct;
         d.totalLabor     = jobCalc.totalLabor;
         d.totalMaterials = jobCalc.totalMaterials;
@@ -4007,7 +3969,7 @@ async function handleLogin() {
 ================================================================ */
 function finalizeDraft(status) {
   const d = app.draft;
-  const jobCalc = calcJob(d.panes, d.supplier);
+  const jobCalc = calcJob(d.panes, d.supplier, { rounded: true });
   const quote = {
     id:              d.id,
     techId:          app.currentUser.id,
@@ -4077,7 +4039,7 @@ function viewQuoteFromHistory(quoteId) {
 async function saveAdminEdit() {
   const d = app.draft;
   if (!d || !d.isAdminEdit) return;
-  const jobCalc = calcJob(d.panes, d.supplier);
+  const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' });
   const updated = {
     ...d,
     totalProduct:   jobCalc.totalProduct,
