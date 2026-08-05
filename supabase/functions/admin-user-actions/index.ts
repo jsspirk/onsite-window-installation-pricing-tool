@@ -118,21 +118,12 @@ Deno.serve(async (req) => {
         );
       }
 
-      const { data: targetProfile } = await supabaseAdmin
-        .from('profiles')
-        .select('role')
-        .eq('id', targetId)
-        .single();
-      if (targetProfile?.role === 'admin') {
-        const { count: adminCount, error: adminErr } = await supabaseAdmin
-          .from('profiles')
-          .select('id', { count: 'exact', head: true })
-          .eq('role', 'admin');
-        if (adminErr) return json({ error: adminErr.message }, 500);
-        if ((adminCount || 0) <= 1) {
-          return json({ error: 'Cannot delete the last remaining admin.' }, 400);
-        }
-      }
+      // No separate "last admin" check: the caller must already be an admin
+      // to reach this function at all, so the only way the target could be
+      // the sole remaining admin is if the caller IS that admin — which the
+      // self-delete guard above already blocks. That guard is what actually
+      // provides "you can never delete the last admin"; this would be
+      // unreachable dead code.
 
       const { error: delErr } = await supabaseAdmin.auth.admin.deleteUser(targetId);
       if (delErr) return json({ error: delErr.message }, 500);
