@@ -144,7 +144,7 @@ function fmtRange(n) {
   const band  = parseFloat(localStorage.getItem('fg_range_band') || '0.08');
   const floor = parseFloat(localStorage.getItem('fg_min_job_cost') || '400');
   const low   = Math.max(floor, n * (1 - band));
-  const high  = n * (1 + band);
+  const high  = Math.max(floor, n * (1 + band));
   return `${fmt(low)} \u2013 ${fmt(high)}`;
 }
 
@@ -568,6 +568,14 @@ test('admin-configured min job cost does not affect prices above the floor', () 
   const result = fmtRange(1000);
   assert.ok(result.includes('$920.00'), `Low end should be $920.00 (unaffected by $600 floor), got: ${result}`);
   delete _store['fg_min_job_cost'];
+});
+
+test('floor applies to both ends — high end never falls below the floored low end', () => {
+  delete _store['fg_min_job_cost'];
+  // 350 × 1.08 = 378, still below the $400 floor — high must also floor to $400,
+  // not stay at $378 (which would render as the low end exceeding the high end).
+  const result = fmtRange(350);
+  assert.strictEqual(result, '$400.00 – $400.00', `Both ends should floor to $400.00, got: ${result}`);
 });
 
 // ─── G. Admin-locked default supplier ────────────────────────────────────────

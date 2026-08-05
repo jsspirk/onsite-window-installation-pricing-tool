@@ -1766,8 +1766,11 @@ function fmt(n) {
 function fmtRange(n) {
   const band = appConfig.range_band || 0.08;
   const floor = appConfig.min_job_cost ?? 400;
+  // Both ends get floored, not just the low end \u2014 otherwise a raw price
+  // just above the floor can produce a high end below the (unfloored) low
+  // end once the low is clamped, e.g. "$400.00 \u2013 $290.70".
   const low  = Math.max(floor, n * (1 - band));
-  const high = n * (1 + band);
+  const high = Math.max(floor, n * (1 + band));
   return `${fmt(low)} \u2013 ${fmt(high)}`;
 }
 
@@ -1776,7 +1779,7 @@ function fmtRangeCustomer(n) {
   const inc  = appConfig.round_increment || 25;
   const floor = appConfig.min_job_cost ?? 400;
   const low  = Math.floor(Math.max(floor, n * (1 - band)) / inc) * inc;
-  const high = Math.floor(n * (1 + band) / inc) * inc;
+  const high = Math.floor(Math.max(floor, n * (1 + band)) / inc) * inc;
   return `${fmt(low)} \u2013 ${fmt(high)}`;
 }
 
