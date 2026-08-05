@@ -34,6 +34,8 @@
       --orange-bg: rgba(249,115,22,0.1);
       --blue: #3B82F6;
       --blue-bg: rgba(59,130,246,0.1);
+      --purple: #8B5CF6;
+      --purple-bg: rgba(139,92,246,0.1);
 
       --text-0: #F0F4FF;
       --text-1: #B0BBCC;
@@ -84,6 +86,8 @@
       --orange-bg: rgba(234,88,12,0.1);
       --blue: #2563EB;
       --blue-bg: rgba(37,99,235,0.1);
+      --purple: #7C3AED;
+      --purple-bg: rgba(124,58,237,0.1);
 
       --text-0: #0C0E14;
       --text-1: #2D3748;
@@ -524,6 +528,7 @@
     .badge-draft { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue); }
     .badge-flagged { background: var(--orange-bg); color: var(--orange); border: 1px solid var(--orange); }
     .badge-shown { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber); }
+    .badge-approved { background: var(--purple-bg); color: var(--purple); border: 1px solid var(--purple); }
 
     /* ================================================================
        HISTORY LIST
@@ -869,6 +874,17 @@
       border: none; border-radius: 50%;
       font-size: 20px; cursor: pointer;
       display: flex; align-items: center; justify-content: center;
+    }
+    .cv-approve-btn {
+      display: block; width: 100%; margin-top: 24px;
+      background: #F59E0B; color: #1a1206; border: none; border-radius: 10px;
+      height: 52px; font-weight: 800; font-size: 15px;
+      text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer;
+    }
+    .cv-approved-badge {
+      margin-top: 24px; padding: 14px; text-align: center;
+      background: #f0fdf4; border: 1.5px solid #10B981; border-radius: 10px;
+      color: #065f46; font-weight: 700; font-size: 14px;
     }
 
     /* ================================================================
@@ -1370,9 +1386,13 @@ function savePendingSync(queue) {
   } catch (e) { console.warn('Pending sync storage write failed', e); }
 }
 
-function queuePendingSync(quote, panes) {
+function queuePendingSync(quote, panes, signatureDataUrl) {
   const queue = loadPendingSync();
-  queue[quote.id] = { quote, panes };
+  const existing = queue[quote.id];
+  // Preserve a previously-queued signature if this particular write doesn't
+  // carry one (e.g. a pane autosave firing after a signature was captured
+  // but before either has actually flushed) — don't let it get dropped.
+  queue[quote.id] = { quote, panes, signatureDataUrl: signatureDataUrl || existing?.signatureDataUrl || null };
   savePendingSync(queue);
 }
 
@@ -1604,6 +1624,10 @@ function normalizeQuote(row) {
     totalLabor:      parseFloat(row.total_labor),
     totalMaterials:  parseFloat(row.total_materials),
     grandTotal:      parseFloat(row.grand_total),
+    agreedPrice:     row.agreed_price !== null && row.agreed_price !== undefined ? parseFloat(row.agreed_price) : null,
+    customerApproved: !!row.customer_approved,
+    approvedAt:      row.approved_at,
+    signatureUrl:    row.signature_url,
     catalogVersion:  row.catalog_version,
     createdAt:       row.created_at,
     syncedAt:        row.synced_at,
@@ -1632,7 +1656,29 @@ async function loadQuotes() {
 
 // The actual network write. Throws on any failure so callers can decide
 // whether to retry immediately or queue for later.
-async function doSyncQuote(quote, panes) {
+// Converts a canvas.toDataURL() string into a Blob for Supabase Storage upload.
+function dataUrlToBlob(dataUrl) {
+  const [header, base64] = dataUrl.split(',');
+  const mime = header.match(/data:(.*?);/)[1];
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+// signatureDataUrl, when provided, uploads to the private signatures bucket
+// before the quote row write, so signature_url always points at a real
+// object by the time the row lands — whether this runs immediately (online)
+// or later via flushPendingSync (was captured offline).
+async function doSyncQuote(quote, panes, signatureDataUrl) {
+  let signatureUrl = quote.signatureUrl || null;
+  if (signatureDataUrl) {
+    const path = `${quote.id}.png`;
+    const { error: upError } = await sb.storage.from('signatures')
+      .upload(path, dataUrlToBlob(signatureDataUrl), { upsert: true, contentType: 'image/png' });
+    if (upError) throw upError;
+    signatureUrl = path;
+  }
   const quoteRow = {
     id:               quote.id,
     tech_id:          quote.techId,
@@ -1650,6 +1696,10 @@ async function doSyncQuote(quote, panes) {
     total_labor:      quote.totalLabor,
     total_materials:  quote.totalMaterials,
     grand_total:      quote.grandTotal,
+    agreed_price:     quote.agreedPrice ?? null,
+    customer_approved: !!quote.customerApproved,
+    approved_at:      quote.approvedAt || null,
+    signature_url:    signatureUrl,
     catalog_version:  String(quote.catalogVersion),
     synced_at:        new Date().toISOString(),
   };
@@ -1683,6 +1733,20 @@ async function doSyncQuote(quote, panes) {
     const { error: insError } = await sb.from('panes').insert(paneRows);
     if (insError) throw insError;
   }
+  return { signatureUrl };
+}
+
+// A signature upload resolves its real storage path only inside
+// doSyncQuote — patch that back into the local optimistic copy (and the
+// active draft, if it's still this quote) so any later local-state-based
+// write, e.g. an admin reverting an approved quote back to 'sent', doesn't
+// blow the resolved value away with the stale null it started as.
+function patchLocalSignatureUrl(id, signatureUrl) {
+  if (!signatureUrl) return;
+  const q = appData.quotes.find(x => x.id === id);
+  if (q) q.signatureUrl = signatureUrl;
+  if (app.draft && app.draft.id === id) app.draft.signatureUrl = signatureUrl;
+  saveState(appData);
 }
 
 // Ensures writes for the same quote never land out of order — autosave can
@@ -1703,19 +1767,20 @@ function chainedSync(id, fn) {
 // losing it whenever the network isn't actually reachable — either because
 // we're offline, or because isOnline said true but the request failed
 // anyway (weak signal, captive portal, etc).
-function syncQuoteToSupabase(quote, panes) {
+function syncQuoteToSupabase(quote, panes, signatureDataUrl) {
   saveState(appData);
   if (!app.isOnline) {
-    queuePendingSync(quote, panes);
+    queuePendingSync(quote, panes, signatureDataUrl);
     return Promise.resolve();
   }
   return chainedSync(quote.id, async () => {
     try {
-      await doSyncQuote(quote, panes);
+      const { signatureUrl } = await doSyncQuote(quote, panes, signatureDataUrl);
       unqueuePendingSync(quote.id);
+      patchLocalSignatureUrl(quote.id, signatureUrl);
     } catch (e) {
       console.warn('Sync failed, queued for retry', e);
-      queuePendingSync(quote, panes);
+      queuePendingSync(quote, panes, signatureDataUrl);
     }
   });
 }
@@ -1727,11 +1792,12 @@ async function flushPendingSync() {
   if (!app.isOnline) return;
   const queue = loadPendingSync();
   for (const id of Object.keys(queue)) {
-    const { quote, panes } = queue[id];
+    const { quote, panes, signatureDataUrl } = queue[id];
     await chainedSync(id, async () => {
       try {
-        await doSyncQuote(quote, panes);
+        const { signatureUrl } = await doSyncQuote(quote, panes, signatureDataUrl);
         unqueuePendingSync(id);
+        patchLocalSignatureUrl(id, signatureUrl);
       } catch (e) {
         console.warn('Flush failed for quote', id, e);
         // left queued — will retry on the next flush
@@ -1763,24 +1829,28 @@ function fmt(n) {
   return '$' + (+n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-function fmtRange(n) {
+// Both ends get floored, not just the low end \u2014 otherwise a raw price just
+// above the floor can produce a high end below the (unfloored) low end once
+// the low is clamped, e.g. "$400.00 \u2013 $290.70". Returns raw numbers so
+// callers needing the bounds themselves (e.g. the presentation price picker)
+// don't have to re-derive them by parsing a formatted string.
+function rangeBounds(n) {
   const band = appConfig.range_band || 0.08;
   const floor = appConfig.min_job_cost ?? 400;
-  // Both ends get floored, not just the low end \u2014 otherwise a raw price
-  // just above the floor can produce a high end below the (unfloored) low
-  // end once the low is clamped, e.g. "$400.00 \u2013 $290.70".
   const low  = Math.max(floor, n * (1 - band));
   const high = Math.max(floor, n * (1 + band));
+  return { low, high };
+}
+
+function fmtRange(n) {
+  const { low, high } = rangeBounds(n);
   return `${fmt(low)} \u2013 ${fmt(high)}`;
 }
 
 function fmtRangeCustomer(n) {
-  const band = appConfig.range_band    || 0.08;
-  const inc  = appConfig.round_increment || 25;
-  const floor = appConfig.min_job_cost ?? 400;
-  const low  = Math.floor(Math.max(floor, n * (1 - band)) / inc) * inc;
-  const high = Math.floor(Math.max(floor, n * (1 + band)) / inc) * inc;
-  return `${fmt(low)} \u2013 ${fmt(high)}`;
+  const inc = appConfig.round_increment || 25;
+  const { low, high } = rangeBounds(n);
+  return `${fmt(Math.floor(low / inc) * inc)} \u2013 ${fmt(Math.floor(high / inc) * inc)}`;
 }
 
 function fmtDate(iso) {
@@ -1977,10 +2047,15 @@ function draftCurrentPaneCalc() {
 function render() {
   const el = document.getElementById('app');
 
-  // Customer view overlay
+  // Customer view overlay (and its signature-capture sub-screen)
   if (app.customerViewOpen) {
-    el.innerHTML = renderCustomerView(app.customerViewQuoteId);
-    attachCustomerViewEvents();
+    if (app.signatureOpen) {
+      el.innerHTML = renderSignatureCapture();
+      attachSignatureEvents();
+    } else {
+      el.innerHTML = renderCustomerView(app.customerViewQuoteId);
+      attachCustomerViewEvents();
+    }
     return;
   }
 
@@ -1997,6 +2072,7 @@ function render() {
     case 'history':      el.innerHTML = renderHistory(); break;
     case 'admin':        el.innerHTML = renderAdmin(); break;
     case 'quote-detail': el.innerHTML = renderQuoteDetail(); break;
+    case 'present-price': el.innerHTML = renderPresentPrice(); break;
     default:             el.innerHTML = renderLogin();
   }
 
@@ -2836,8 +2912,8 @@ function renderHistory() {
 }
 
 function renderHistoryItem(q, showTech = false) {
-  const statusMap = { sent: 'badge-sent', draft: 'badge-draft', flagged: 'badge-flagged', shown: 'badge-shown' };
-  const iconMap = { sent: '📤', draft: '📝', flagged: '⚑', shown: '👁' };
+  const statusMap = { sent: 'badge-sent', draft: 'badge-draft', flagged: 'badge-flagged', shown: 'badge-shown', approved: 'badge-approved' };
+  const iconMap = { sent: '📤', draft: '📝', flagged: '⚑', shown: '👁', approved: '✓' };
   return `
 <div class="history-item" data-quote-id="${q.id}">
   <div class="history-icon">${iconMap[q.status] || '📋'}</div>
@@ -3111,7 +3187,7 @@ function renderAdminQuoteLog() {
       </thead>
       <tbody>
         ${all.map(q => {
-          const statusMap = { sent: 'badge-sent', draft: 'badge-draft', flagged: 'badge-flagged', shown: 'badge-shown' };
+          const statusMap = { sent: 'badge-sent', draft: 'badge-draft', flagged: 'badge-flagged', shown: 'badge-shown', approved: 'badge-approved' };
           return `
           <tr>
             <td style="font-size:13px;white-space:nowrap;">${fmtDate(q.jobDate)}</td>
@@ -3138,8 +3214,9 @@ function renderQuoteDetail() {
   const d = app.draft;
   if (!d) return '';
   const isRounded = d.status !== 'draft';
+  const isLocked  = d.status === 'approved';
   const jobCalc = calcJob(d.panes, d.supplier, { rounded: isRounded });
-  const statusMap = { sent: 'badge-sent', draft: 'badge-draft', flagged: 'badge-flagged', shown: 'badge-shown' };
+  const statusMap = { sent: 'badge-sent', draft: 'badge-draft', flagged: 'badge-flagged', shown: 'badge-shown', approved: 'badge-approved' };
 
   return `
 <div class="screen" style="background:var(--bg-0);">
@@ -3168,6 +3245,13 @@ function renderQuoteDetail() {
       </div>
     </div>
 
+    ${isLocked ? `
+    <div class="card mb-12" style="border-color:var(--purple);background:var(--purple-bg);">
+      <div style="font-size:13px;color:var(--purple);font-weight:700;">🔒 Approved &amp; Locked</div>
+      <div style="font-size:12px;color:var(--text-2);margin-top:2px;">The customer signed this estimate — pricing is locked.${app.currentUser?.role === 'admin' ? ' Use Revert to Sent below to make a correction.' : ''}</div>
+    </div>
+    ` : ''}
+
     <!-- Panes -->
     <div class="section-label mb-8">${d.panes.length} Pane${d.panes.length !== 1 ? 's' : ''}</div>
     ${d.panes.map((p, i) => {
@@ -3182,9 +3266,10 @@ function renderQuoteDetail() {
             <div style="font-size:12px;color:var(--text-2);margin-top:2px;">${label}${qty > 1 ? ' · Qty ' + qty : ''}</div>
           </div>
           <div style="display:flex;gap:6px;">
-            <button class="btn btn-secondary btn-sm" data-admin-edit-pane="${i}" style="font-size:12px;padding:6px 14px;">Edit Pane</button>
-            <button class="btn btn-ghost btn-sm" data-admin-remove-pane="${i}" ${d.panes.length <= 1 ? 'disabled' : ''}
-              style="font-size:12px;padding:6px 10px;color:var(--red);border-color:var(--red);${d.panes.length <= 1 ? 'opacity:0.3;' : ''}" title="${d.panes.length <= 1 ? 'A quote needs at least one pane' : 'Remove pane'}">✕</button>
+            <button class="btn btn-secondary btn-sm" data-admin-edit-pane="${i}" ${isLocked ? 'disabled' : ''}
+              style="font-size:12px;padding:6px 14px;${isLocked ? 'opacity:0.3;' : ''}">Edit Pane</button>
+            <button class="btn btn-ghost btn-sm" data-admin-remove-pane="${i}" ${d.panes.length <= 1 || isLocked ? 'disabled' : ''}
+              style="font-size:12px;padding:6px 10px;color:var(--red);border-color:var(--red);${d.panes.length <= 1 || isLocked ? 'opacity:0.3;' : ''}" title="${isLocked ? 'Approved quotes are locked' : d.panes.length <= 1 ? 'A quote needs at least one pane' : 'Remove pane'}">✕</button>
           </div>
         </div>
         <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">
@@ -3201,7 +3286,7 @@ function renderQuoteDetail() {
       </div>`;
     }).join('')}
 
-    <button class="btn btn-secondary btn-full mb-8" id="quote-detail-add-pane">+ Add Pane</button>
+    <button class="btn btn-secondary btn-full mb-8" id="quote-detail-add-pane" ${isLocked ? 'disabled' : ''} style="${isLocked ? 'opacity:0.3;' : ''}">+ Add Pane</button>
 
     <!-- Totals -->
     <div class="card mt-8" style="border-color:var(--amber);background:var(--amber-bg);">
@@ -3224,12 +3309,17 @@ function renderQuoteDetail() {
       <button class="btn btn-primary" id="send-quote-btn" style="flex:2;">📤 ${d.status === 'draft' ? 'Send Quote' : 'Re-send Updated Quote'}</button>
     </div>
     ${app.currentUser?.role === 'admin' ? `
+    ${isLocked ? `
+    <div style="font-size:12px;color:var(--text-2);font-family:var(--font-semi);font-weight:600;letter-spacing:0.05em;">QUOTE STATUS</div>
+    <button class="btn btn-secondary btn-full" id="admin-revert-approved">↩ Revert to Sent (unlock editing)</button>
+    ` : `
     <div style="font-size:12px;color:var(--text-2);font-family:var(--font-semi);font-weight:600;letter-spacing:0.05em;">QUOTE STATUS</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       ${['draft','sent','shown','flagged'].map(s => `
         <button class="chip ${d.status === s ? 'active' : ''}" data-admin-status="${s}" style="min-height:36px;font-size:13px;padding:0 14px;">${s}</button>
       `).join('')}
     </div>
+    `}
     <div style="display:flex;gap:8px;">
       <button class="btn btn-ghost btn-sm" id="admin-delete-btn" style="flex:1;color:var(--red);border-color:var(--red);">🗑 Delete</button>
       <button class="btn btn-primary" id="admin-edit-save" style="flex:2;">✓ Save Quote</button>
@@ -3349,6 +3439,63 @@ function renderAdminBranding() {
 }
 
 /* ================================================================
+   SCREEN: PRESENTATION PRICE
+   Gates every path to the customer view — a price gets picked once,
+   here, and reused everywhere after (Customer View, re-opens, re-sends).
+================================================================ */
+function renderPresentPrice() {
+  const d = app.draft;
+  if (!d) return '';
+  const jobCalc = calcJob(d.panes, d.supplier, { rounded: true });
+  const inc = appConfig.round_increment || 25;
+  const { low, high } = rangeBounds(jobCalc.grandTotal);
+  const incLow  = roundToIncrement(low, inc);
+  const incHigh = roundToIncrement(high, inc);
+  const mid     = roundToIncrement((low + high) / 2, inc);
+  if (d.pendingPresentPrice === undefined || d.pendingPresentPrice === null) {
+    d.pendingPresentPrice = d.agreedPrice ?? mid;
+  }
+  const price = d.pendingPresentPrice;
+
+  return `
+<div class="screen" style="background:var(--bg-0);">
+  <div class="app-header">
+    <button class="header-back-btn" id="present-price-back">←</button>
+    <div class="header-title">Presentation Price</div>
+    <div class="header-right">${headerNavIcons()}</div>
+  </div>
+
+  <div class="scroll-content" style="padding:16px;">
+    <div class="card">
+      <div class="section-label mb-8">Approved Range</div>
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:18px;line-height:1.5;">
+        ${fmt(incLow)} – ${fmt(incHigh)} · pick the exact number you'll present to the customer
+      </div>
+
+      <div style="text-align:center;margin:8px 0 18px;">
+        <div style="font-family:var(--font-title);font-weight:800;font-size:44px;color:var(--amber);line-height:1;">$${Math.round(price).toLocaleString('en-US')}</div>
+        <div style="font-size:12px;color:var(--text-3);margin-top:4px;">your presentation price</div>
+      </div>
+
+      <div class="qty-stepper" style="margin-bottom:16px;">
+        <button class="qty-btn" id="present-price-dec">−</button>
+        <span class="qty-val" id="present-price-val">${fmt(price)}</span>
+        <button class="qty-btn" id="present-price-inc">+</button>
+      </div>
+
+      <div class="chip-group mb-16">
+        <div class="chip ${price === incLow ? 'active' : ''}" data-present-price="${incLow}">Low · ${fmt(incLow)}</div>
+        <div class="chip ${price === mid ? 'active' : ''}" data-present-price="${mid}">Mid · ${fmt(mid)}</div>
+        <div class="chip ${price === incHigh ? 'active' : ''}" data-present-price="${incHigh}">High · ${fmt(incHigh)}</div>
+      </div>
+
+      <button class="btn btn-primary btn-full" id="present-price-continue">Continue → Show Customer</button>
+    </div>
+  </div>
+</div>`;
+}
+
+/* ================================================================
    SCREEN: CUSTOMER VIEW (PRESENTATION MODE)
 ================================================================ */
 function renderCustomerView(quoteId) {
@@ -3366,6 +3513,9 @@ function renderCustomerView(quoteId) {
       totalLabor: jobCalc.totalLabor,
       totalMaterials: 0,
       grandTotal: jobCalc.grandTotal,
+      agreedPrice: d.agreedPrice,
+      customerApproved: d.customerApproved,
+      approvedAt: d.approvedAt,
     };
   } else {
     q = appData.quotes.find(x => x.id === quoteId);
@@ -3409,14 +3559,138 @@ function renderCustomerView(quoteId) {
   <div class="cv-divider"></div>
 
   <div class="cv-total" style="border-top:2px solid #000;margin-top:8px;">
-    <span class="cv-total-label">ESTIMATE RANGE</span>
-    <span class="cv-total-value" style="font-size:22px;">${fmtRangeCustomer(q.grandTotal)}</span>
+    <span class="cv-total-label">Your Price</span>
+    <span class="cv-total-value" style="font-size:22px;">${fmt(q.agreedPrice ?? q.grandTotal)}</span>
   </div>
 
   <div class="cv-disclaimer">
     This is an estimate only and is subject to final inspection upon completion of work. Actual costs may vary based on unforeseen conditions discovered during installation. This estimate does not constitute a binding contract. ${brand.name} reserves the right to adjust pricing based on final inspection findings. Does not include applicable taxes.
   </div>
+
+  ${q.customerApproved
+    ? `<div class="cv-approved-badge">✓ Approved &amp; signed ${q.approvedAt ? 'on ' + fmtDate(q.approvedAt) : ''}</div>`
+    : `<button class="cv-approve-btn" id="cv-approve-btn">✓ Approve This Price — Sign</button>`}
 </div>`;
+}
+
+/* ================================================================
+   SCREEN: SIGNATURE CAPTURE
+   Optional, separate from just showing the price — reached only via the
+   explicit "Approve This Price" button on the customer view.
+================================================================ */
+function renderSignatureCapture() {
+  const d = app.draft || {};
+  const brand = getBrand();
+  const canSubmit = !!(app.signatureCheckbox && app.signatureHasStrokes);
+  return `
+<div class="customer-view">
+  <button class="cv-close" id="sig-back-btn">←</button>
+
+  <div class="cv-logo">${brand.name}</div>
+  <div class="cv-subtitle">Confirm &amp; Sign</div>
+
+  <div class="cv-label">Approving</div>
+  <div class="cv-value" style="font-size:24px;color:#F59E0B;font-weight:800;">${fmt(d.agreedPrice ?? 0)}</div>
+
+  <div class="cv-divider"></div>
+
+  <label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:20px;cursor:pointer;">
+    <input type="checkbox" id="sig-checkbox" style="width:22px;height:22px;flex-shrink:0;margin-top:1px;" ${app.signatureCheckbox ? 'checked' : ''} />
+    <span style="font-size:14px;color:#333;line-height:1.5;">I approve this estimate and authorize the work to proceed at the price shown above.</span>
+  </label>
+
+  <div class="cv-label">Signature</div>
+  <canvas id="signature-canvas" width="335" height="160" style="width:100%;height:160px;background:#fafafa;border:1.5px solid #ddd;border-radius:10px;touch-action:none;display:block;"></canvas>
+  <button id="sig-clear-btn" style="margin-top:8px;background:none;border:none;color:#888;font-size:13px;text-decoration:underline;cursor:pointer;padding:0;">Clear</button>
+
+  <button class="cv-approve-btn" id="sig-submit-btn" ${canSubmit ? '' : 'disabled'} style="margin-top:20px;${canSubmit ? '' : 'opacity:0.4;cursor:not-allowed;'}">✓ Confirm &amp; Sign</button>
+
+  <div class="cv-disclaimer">
+    By signing, ${d.customerName || 'the customer'} authorizes ${brand.name} to proceed with the work described in this estimate at the price shown above.
+  </div>
+</div>`;
+}
+
+function attachSignatureEvents() {
+  const backBtn = document.getElementById('sig-back-btn');
+  if (backBtn) backBtn.addEventListener('click', () => {
+    app.signatureOpen = false;
+    render();
+  });
+
+  const checkbox = document.getElementById('sig-checkbox');
+  if (checkbox) checkbox.addEventListener('change', e => {
+    app.signatureCheckbox = e.target.checked;
+    updateSignatureSubmitState();
+  });
+
+  const canvas = document.getElementById('signature-canvas');
+  let ctx = null, drawing = false, last = null;
+  if (canvas) {
+    ctx = canvas.getContext('2d');
+    ctx.strokeStyle = '#1a1a2e';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    const pos = e => {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (e.clientX - rect.left) * (canvas.width / rect.width),
+        y: (e.clientY - rect.top) * (canvas.height / rect.height),
+      };
+    };
+    canvas.addEventListener('pointerdown', e => {
+      canvas.setPointerCapture(e.pointerId);
+      drawing = true;
+      last = pos(e);
+      app.signatureHasStrokes = true;
+      updateSignatureSubmitState();
+    });
+    canvas.addEventListener('pointermove', e => {
+      if (!drawing) return;
+      const p = pos(e);
+      ctx.beginPath();
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      last = p;
+    });
+    const stop = () => { drawing = false; };
+    canvas.addEventListener('pointerup', stop);
+    canvas.addEventListener('pointerleave', stop);
+    canvas.addEventListener('pointercancel', stop);
+  }
+
+  const clearBtn = document.getElementById('sig-clear-btn');
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    if (ctx && canvas) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    app.signatureHasStrokes = false;
+    updateSignatureSubmitState();
+  });
+
+  const submitBtn = document.getElementById('sig-submit-btn');
+  if (submitBtn) submitBtn.addEventListener('click', () => {
+    if (!app.signatureCheckbox || !app.signatureHasStrokes || !canvas) return;
+    const dataUrl = canvas.toDataURL('image/png');
+    const d = app.draft;
+    d.customerApproved = true;
+    d.approvedAt = new Date().toISOString();
+    app.signatureOpen = false;
+    app.customerViewOpen = false;
+    app.customerViewQuoteId = null;
+    app.pendingSaveAsShown = false;
+    completeSendAction('approved', dataUrl);
+  });
+}
+
+function updateSignatureSubmitState() {
+  const btn = document.getElementById('sig-submit-btn');
+  if (!btn) return;
+  const can = !!(app.signatureCheckbox && app.signatureHasStrokes);
+  btn.disabled = !can;
+  btn.style.opacity = can ? '1' : '0.4';
+  btn.style.cursor = can ? 'pointer' : 'not-allowed';
 }
 
 /* ================================================================
@@ -3953,11 +4227,7 @@ function attachEvents() {
   on('review-tools', 'input', e => { if (app.draft) app.draft.toolsRequired = e.target.value; });
   on('review-notes', 'input', e => { if (app.draft) app.draft.notes = e.target.value; });
 
-  on('show-customer-btn', 'click', () => {
-    app.customerViewOpen = true;
-    app.customerViewQuoteId = '__draft__';
-    render();
-  });
+  on('show-customer-btn', 'click', () => openCustomerViewOrGate());
 
   on('send-quote-btn', 'click', () => {
     app.sendModal = true;
@@ -3978,10 +4248,8 @@ function attachEvents() {
   on('show-screen-btn', 'click', () => {
     // Show presentation first, then save as 'shown' when closed
     app.pendingSaveAsShown = true;
-    app.customerViewOpen = true;
-    app.customerViewQuoteId = '__draft__';
     app.sendModal = false;
-    render();
+    openCustomerViewOrGate();
   });
   on('send-with-contact-btn', 'click', () => {
     const contact = document.getElementById('modal-contact')?.value;
@@ -3992,11 +4260,60 @@ function attachEvents() {
     completeSendAction('sent');
   });
 
+  // ---- PRESENTATION PRICE ----
+  on('present-price-back', 'click', () => {
+    navigate(app.draft?.isAdminEdit ? 'quote-detail' : 'review');
+  });
+  on('present-price-dec', 'click', () => {
+    const d = app.draft;
+    const jobCalc = calcJob(d.panes, d.supplier, { rounded: true });
+    const inc = appConfig.round_increment || 25;
+    const incLow = roundToIncrement(rangeBounds(jobCalc.grandTotal).low, inc);
+    d.pendingPresentPrice = Math.max(incLow, (d.pendingPresentPrice ?? incLow) - inc);
+    render();
+  });
+  on('present-price-inc', 'click', () => {
+    const d = app.draft;
+    const jobCalc = calcJob(d.panes, d.supplier, { rounded: true });
+    const inc = appConfig.round_increment || 25;
+    const incHigh = roundToIncrement(rangeBounds(jobCalc.grandTotal).high, inc);
+    d.pendingPresentPrice = Math.min(incHigh, (d.pendingPresentPrice ?? incHigh) + inc);
+    render();
+  });
+  delegate('[data-present-price]', 'click', e => {
+    app.draft.pendingPresentPrice = parseFloat(e.currentTarget.dataset.presentPrice);
+    render();
+  });
+  on('present-price-continue', 'click', () => {
+    const d = app.draft;
+    d.agreedPrice = d.pendingPresentPrice;
+    delete d.pendingPresentPrice;
+    if (d.isAdminEdit) {
+      const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' });
+      d.totalProduct   = jobCalc.totalProduct;
+      d.totalLabor     = jobCalc.totalLabor;
+      d.totalMaterials = jobCalc.totalMaterials;
+      d.grandTotal     = jobCalc.grandTotal;
+      appData.quotes = appData.quotes.map(q => q.id === d.id ? { ...d } : q);
+      saveState(appData);
+      syncQuoteToSupabase(d, d.panes);
+    } else {
+      autosaveDraft(d);
+    }
+    // The customer-view overlay renders on top of whatever app.route is
+    // underneath — closing it falls back to that route. Restore it to
+    // where Continue was reached from (present-price isn't a real
+    // destination to land back on), same as the back button does.
+    app.route = d.isAdminEdit ? 'quote-detail' : 'review';
+    openCustomerViewOrGate();
+  });
+
   // Admin edit actions
   on('admin-edit-save', 'click', () => saveAdminEdit());
   on('admin-delete-btn', 'click', () => {
     if (app.draft?.isAdminEdit) deleteAdminQuote(app.draft.id);
   });
+  on('admin-revert-approved', 'click', () => revertApprovedQuote());
   delegate('[data-admin-status]', 'click', e => {
     if (app.draft?.isAdminEdit) {
       app.draft.status = e.currentTarget.dataset.adminStatus;
@@ -4052,6 +4369,15 @@ function attachCustomerViewEvents() {
         app.customerViewQuoteId = null;
         render();
       }
+    });
+  }
+  const approveBtn = document.getElementById('cv-approve-btn');
+  if (approveBtn) {
+    approveBtn.addEventListener('click', () => {
+      app.signatureCheckbox = false;
+      app.signatureHasStrokes = false;
+      app.signatureOpen = true;
+      render();
     });
   }
 }
@@ -4130,6 +4456,10 @@ function autosaveDraft(d) {
     totalLabor:      jobCalc.totalLabor,
     totalMaterials:  jobCalc.totalMaterials,
     grandTotal:      jobCalc.grandTotal,
+    agreedPrice:     d.agreedPrice ?? null,
+    customerApproved: !!d.customerApproved,
+    approvedAt:      d.approvedAt || null,
+    signatureUrl:    d.signatureUrl || null,
     catalogVersion:  d.catalogVersion,
     createdAt:       existing?.createdAt || new Date().toISOString(),
     syncedAt:        app.isOnline ? new Date().toISOString() : null,
@@ -4159,7 +4489,7 @@ async function deleteDraftIfEmpty(id) {
 /* ================================================================
    FINALIZE DRAFT → SAVE QUOTE
 ================================================================ */
-function finalizeDraft(status) {
+function finalizeDraft(status, signatureDataUrl) {
   const d = app.draft;
   const jobCalc = calcJob(d.panes, d.supplier, { rounded: true });
   const quote = {
@@ -4180,6 +4510,10 @@ function finalizeDraft(status) {
     totalLabor:      jobCalc.totalLabor,
     totalMaterials:  jobCalc.totalMaterials,
     grandTotal:      jobCalc.grandTotal,
+    agreedPrice:     d.agreedPrice ?? null,
+    customerApproved: !!d.customerApproved,
+    approvedAt:      d.approvedAt || null,
+    signatureUrl:    d.signatureUrl || null,
     catalogVersion:  d.catalogVersion,
     createdAt:       new Date().toISOString(),
     syncedAt:        app.isOnline ? new Date().toISOString() : null,
@@ -4191,7 +4525,7 @@ function finalizeDraft(status) {
   app.draft = null;
 
   // Background sync to Supabase — does not block navigation
-  syncQuoteToSupabase(quote, quote.panes);
+  syncQuoteToSupabase(quote, quote.panes, signatureDataUrl);
 
   return quote;
 }
@@ -4221,6 +4555,10 @@ function viewQuoteFromHistory(quoteId) {
     createdAt: q.createdAt,
     techId: q.techId,
     techName: q.techName,
+    agreedPrice: q.agreedPrice ?? null,
+    customerApproved: !!q.customerApproved,
+    approvedAt: q.approvedAt || null,
+    signatureUrl: q.signatureUrl || null,
     isAdminEdit: true,
   };
   navigate('quote-detail');
@@ -4235,7 +4573,11 @@ function viewQuoteFromHistory(quoteId) {
 // here would silently reassign ownership to whoever clicks Send, and reset
 // the quote's original creation date every time it's re-sent. This keeps
 // the original tech and creation date, and only updates status/totals.
-function updateQuoteStatus(status) {
+// opts.keepDraft: normally this ends the editing session (app.draft = null,
+// caller navigates away). The admin "Revert to Sent" action needs the
+// opposite — stay right here with editing now unlocked — so it can pass
+// keepDraft to update app.draft in place instead.
+function updateQuoteStatus(status, opts = {}, signatureDataUrl) {
   const d = app.draft;
   if (!d || !d.isAdminEdit) return null;
   const jobCalc = calcJob(d.panes, d.supplier, { rounded: true });
@@ -4257,27 +4599,72 @@ function updateQuoteStatus(status) {
     totalLabor:      jobCalc.totalLabor,
     totalMaterials:  jobCalc.totalMaterials,
     grandTotal:      jobCalc.grandTotal,
+    agreedPrice:     d.agreedPrice ?? null,
+    customerApproved: !!d.customerApproved,
+    approvedAt:      d.approvedAt || null,
+    signatureUrl:    d.signatureUrl || null,
     catalogVersion:  d.catalogVersion,
     createdAt:       d.createdAt,
     syncedAt:        app.isOnline ? new Date().toISOString() : null,
   };
   appData.quotes = appData.quotes.map(q => q.id === updated.id ? updated : q);
   saveState(appData);
-  app.draft = null;
-  syncQuoteToSupabase(updated, updated.panes);
+  if (opts.keepDraft) {
+    Object.assign(d, updated);
+  } else {
+    app.draft = null;
+  }
+  syncQuoteToSupabase(updated, updated.panes, signatureDataUrl);
   return updated;
 }
 
 // Shared by every Send/Show-on-screen completion point (SMS/email send,
-// manual-contact send, and "shown" on customer-view close). Routes to
-// finalizeDraft (fresh quote → Sent confirmation screen) or
-// updateQuoteStatus (reopened quote → back to Home, matching Save's
-// existing navigation) depending on how we got here.
-function completeSendAction(status) {
+// manual-contact send, and signature capture). Routes to finalizeDraft
+// (fresh quote → Sent confirmation screen) or updateQuoteStatus (reopened
+// quote → back to Home, matching Save's existing navigation) depending on
+// how we got here.
+function completeSendAction(status, signatureDataUrl) {
   const isReopen = !!app.draft?.isAdminEdit;
-  const finalQuote = isReopen ? updateQuoteStatus(status) : finalizeDraft(status);
+  const finalQuote = isReopen
+    ? updateQuoteStatus(status, {}, signatureDataUrl)
+    : finalizeDraft(status, signatureDataUrl);
   if (isReopen) navigate('home');
   else navigate('sent', { quoteId: finalQuote.id });
+}
+
+// Admin-only escape hatch for an approved (signed) quote that needs a
+// correction. Deliberately separate from the normal status chips — reverts
+// status to 'sent' and unlocks pane editing, but does NOT clear the
+// customer's existing signature/approval fields. That evidence stays on
+// the record even though current status is no longer 'approved'.
+function revertApprovedQuote() {
+  const d = app.draft;
+  if (!d || d.status !== 'approved') return;
+  if (!confirm('Revert this quote to Sent? This unlocks pane editing. The customer\'s existing signature and approval stay on file.')) return;
+  updateQuoteStatus('sent', { keepDraft: true });
+  render();
+}
+
+// Every path to the customer view goes through here first. If a price
+// hasn't been picked for this quote yet, route to the picker instead of
+// opening the customer view — once picked, it's reused for every future
+// view of this same quote, so the picker never appears again after this.
+function openCustomerViewOrGate() {
+  const d = app.draft;
+  if (!d) return;
+  if (d.agreedPrice === undefined || d.agreedPrice === null) {
+    const jobCalc = calcJob(d.panes, d.supplier, { rounded: true });
+    if (jobCalc.lineItems.length < d.panes.length) {
+      alert('This quote includes items that need a custom quote. Resolve those before presenting a price to the customer.');
+      app.pendingSaveAsShown = false;
+      return;
+    }
+    navigate('present-price');
+    return;
+  }
+  app.customerViewOpen = true;
+  app.customerViewQuoteId = '__draft__';
+  render();
 }
 
 async function saveAdminEdit() {

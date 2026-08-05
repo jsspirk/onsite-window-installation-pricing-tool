@@ -140,11 +140,16 @@ function fmt(n) {
   return '$' + (+n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-function fmtRange(n) {
+function rangeBounds(n) {
   const band  = parseFloat(localStorage.getItem('fg_range_band') || '0.08');
   const floor = parseFloat(localStorage.getItem('fg_min_job_cost') || '400');
   const low   = Math.max(floor, n * (1 - band));
   const high  = Math.max(floor, n * (1 + band));
+  return { low, high };
+}
+
+function fmtRange(n) {
+  const { low, high } = rangeBounds(n);
   return `${fmt(low)} \u2013 ${fmt(high)}`;
 }
 
