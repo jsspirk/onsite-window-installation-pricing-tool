@@ -798,6 +798,12 @@
       text-align: center;
       min-height: 20px;
     }
+    .link-btn {
+      background: none; border: none; cursor: pointer;
+      color: var(--amber); font-family: var(--font-body);
+      font-size: 13px; font-weight: 600;
+      padding: 6px;
+    }
 
     /* ================================================================
        HOME SCREEN
@@ -1296,63 +1302,6 @@ function isHeavyLift(pane) {
   return w >= heavy || (pane.storyLevel === 'upper' && w >= elevated);
 }
 
-const DEFAULT_USERS = [
-  { id: 'tech_001', username: 'tech1', password: 'demo', name: 'Mike Torres', role: 'tech' },
-  { id: 'tech_002', username: 'tech2', password: 'demo', name: 'Sarah Chen', role: 'tech' },
-  { id: 'admin_001', username: 'admin', password: 'demo', name: 'Office Admin', role: 'admin' },
-];
-
-const SAMPLE_QUOTES = [
-  {
-    id: 'q_sample_1',
-    techId: 'tech_001',
-    techName: 'Mike Torres',
-    customerName: 'R. Johnson',
-    customerContact: '720-555-0142',
-    contactType: 'phone',
-    jobDate: new Date(Date.now() - 86400000 * 2).toISOString(),
-    status: 'sent',
-    supplier: 'busick',
-    difficulty: 'easy',
-    jobNum: '',
-    notes: '',
-    toolsRequired: '',
-    panes: [
-      { id: 'p1', thickness: '1/4"', coating: 'c270', finish: 'annealed', spacer: 'grey',
-        gridEnabled: false, gridH: 0, gridV: 0, gridSize: '', gridColor: '',
-        shape: 'standard', location: 'Living Rm', qty: 1,
-        width: 36, height: 48, unit: 'in' }
-    ],
-    totalProduct: 0, totalLabor: 0, totalMaterials: 0, grandTotal: 0,
-    catalogVersion: 1,
-    createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-  },
-  {
-    id: 'q_sample_2',
-    techId: 'tech_001',
-    techName: 'Mike Torres',
-    customerName: 'The Williams Family',
-    customerContact: 'williams@email.com',
-    contactType: 'email',
-    jobDate: new Date(Date.now() - 86400000 * 5).toISOString(),
-    status: 'sent',
-    supplier: 'busick',
-    difficulty: 'medium',
-    jobNum: 'EST-2041',
-    notes: 'Both windows same size. Second floor bedroom.',
-    toolsRequired: '6ft ladder',
-    panes: [
-      { id: 'p1', thickness: '1/8"', coating: 'clear', finish: 'tempered', spacer: 'mill',
-        gridEnabled: true, gridH: 2, gridV: 3, gridSize: '5/8"', gridColor: 'White',
-        shape: 'standard', location: 'Master BR', qty: 2,
-        width: 24, height: 36, unit: 'in' },
-    ],
-    totalProduct: 0, totalLabor: 0, totalMaterials: 0, grandTotal: 0,
-    catalogVersion: 1,
-    createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
-  },
-];
-
 /* ================================================================
    STORAGE LAYER
 ================================================================ */
@@ -1409,7 +1358,6 @@ function initState() {
   if (saved) return { ...saved, quotes: [] }; // quotes now come from Supabase
   return {
     catalog: DEFAULT_CATALOG,
-    users: DEFAULT_USERS,
     quotes: [],
     lastSync: new Date().toISOString(),
   };
@@ -2073,6 +2021,8 @@ function render() {
     case 'admin':        el.innerHTML = renderAdmin(); break;
     case 'quote-detail': el.innerHTML = renderQuoteDetail(); break;
     case 'present-price': el.innerHTML = renderPresentPrice(); break;
+    case 'forgot-password': el.innerHTML = renderForgotPassword(); break;
+    case 'set-new-password': el.innerHTML = renderSetNewPassword(); break;
     default:             el.innerHTML = renderLogin();
   }
 
@@ -2163,8 +2113,11 @@ function renderLogin() {
       <input class="form-input" id="login-pass" type="password" autocomplete="current-password"
         placeholder="Enter password" />
     </div>
-    <p class="login-error" id="login-error"></p>
+    <p class="login-error" id="login-error">${app.loginError || ''}</p>
     <button class="btn btn-primary btn-full" id="login-btn">Sign In →</button>
+    <div style="text-align:center;">
+      <button class="link-btn" id="forgot-password-link" type="button">Forgot password?</button>
+    </div>
     <div style="text-align:center; padding-top:8px;">
       ${connBadge()}
     </div>
@@ -2172,6 +2125,82 @@ function renderLogin() {
       ${brand.name} Field Pricer v${APP_VERSION}<br>
       <span style="color:var(--orange); font-size:11px;">⚠ Prototype — catalog rates are placeholder values</span>
     </p>
+  </div>
+</div>`;
+}
+
+/* ================================================================
+   SCREEN: FORGOT PASSWORD
+================================================================ */
+function renderForgotPassword() {
+  const brand = getBrand();
+  return `
+<div class="login-screen screen">
+  <div class="login-logo-area">
+    ${brand.logoSq
+      ? `<img src="${brand.logoSq}" alt="${brand.name}" style="width:140px;height:140px;object-fit:contain;margin-bottom:8px;" />`
+      : `<div class="login-logo-mark">🪟</div><div class="login-brand">${brand.name}</div>`}
+    <div class="login-tagline">Reset Password</div>
+  </div>
+
+  <div class="login-form">
+    ${app.forgotPasswordSent ? `
+    <div style="padding:14px;background:var(--bg-2);border:1px solid var(--border-0);border-radius:var(--radius-md);font-size:14px;color:var(--text-1);text-align:center;">
+      <strong style="color:var(--amber);">Check your email</strong><br>
+      If an account exists for that address, we've sent a link to reset your password.
+    </div>
+    ` : `
+    <p style="font-size:13px;color:var(--text-2);text-align:center;margin:0;">Enter your email and we'll send you a link to reset your password.</p>
+    <div class="form-group">
+      <label class="form-label">Email</label>
+      <input class="form-input" id="forgot-email" type="email" autocomplete="email"
+        autocapitalize="none" placeholder="Enter your email" />
+    </div>
+    <p class="login-error" id="forgot-error"></p>
+    <button class="btn btn-primary btn-full" id="send-reset-btn">Send Reset Link</button>
+    `}
+    <div style="text-align:center;">
+      <button class="link-btn" id="back-to-login-btn" type="button">← Back to Sign In</button>
+    </div>
+  </div>
+</div>`;
+}
+
+/* ================================================================
+   SCREEN: SET NEW PASSWORD
+   Reached automatically when Supabase's PASSWORD_RECOVERY event fires
+   (user clicked the emailed reset link) — see onAuthStateChange below.
+================================================================ */
+function renderSetNewPassword() {
+  const brand = getBrand();
+  return `
+<div class="login-screen screen">
+  <div class="login-logo-area">
+    ${brand.logoSq
+      ? `<img src="${brand.logoSq}" alt="${brand.name}" style="width:140px;height:140px;object-fit:contain;margin-bottom:8px;" />`
+      : `<div class="login-logo-mark">🪟</div><div class="login-brand">${brand.name}</div>`}
+    <div class="login-tagline">Set a New Password</div>
+  </div>
+
+  <div class="login-form">
+    ${app.passwordUpdated ? `
+    <div style="padding:14px;background:var(--bg-2);border:1px solid var(--border-0);border-radius:var(--radius-md);font-size:14px;color:var(--text-1);text-align:center;">
+      <strong style="color:var(--amber);">Password updated</strong><br>
+      You can now sign in with your new password.
+    </div>
+    <button class="btn btn-primary btn-full" id="new-password-continue-btn">Continue to Sign In</button>
+    ` : `
+    <div class="form-group">
+      <label class="form-label">New Password</label>
+      <input class="form-input" id="new-password" type="password" autocomplete="new-password" placeholder="At least 8 characters" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Confirm New Password</label>
+      <input class="form-input" id="new-password-confirm" type="password" autocomplete="new-password" placeholder="Re-enter password" />
+    </div>
+    <p class="login-error" id="new-password-error"></p>
+    <button class="btn btn-primary btn-full" id="set-new-password-btn">Set New Password</button>
+    `}
   </div>
 </div>`;
 }
@@ -2933,7 +2962,7 @@ function renderHistoryItem(q, showTech = false) {
    SCREEN: ADMIN
 ================================================================ */
 function renderAdmin() {
-  const tabs = ['Glass Types', 'Labor & Pricing', 'Materials', 'Quote Log', 'Branding'];
+  const tabs = ['Glass Types', 'Labor & Pricing', 'Materials', 'Quote Log', 'Branding', 'Users'];
   const t = app.activeTab;
   return `
 <div class="screen" style="background:var(--bg-0);">
@@ -2955,6 +2984,7 @@ function renderAdmin() {
     ${t === 2 ? renderAdminMaterials() : ''}
     ${t === 3 ? renderAdminQuoteLog() : ''}
     ${t === 4 ? renderAdminBranding() : ''}
+    ${t === 5 ? renderAdminUsers() : ''}
   </div>
 </div>`;
 }
@@ -3438,6 +3468,49 @@ function renderAdminBranding() {
 </div>`;
 }
 
+function renderAdminUsers() {
+  if (app.adminUsersLoading && !app.adminUsersList) {
+    return `<div class="empty-state"><div class="empty-icon">👥</div><div class="empty-title">Loading users…</div></div>`;
+  }
+  if (app.adminUsersError) {
+    return `
+<div class="empty-state">
+  <div class="empty-icon">⚠</div>
+  <div class="empty-title">Couldn't load users</div>
+  <div class="empty-sub">${app.adminUsersError}</div>
+  <button class="btn btn-secondary mt-12" id="admin-users-retry">Retry</button>
+</div>`;
+  }
+  const users = app.adminUsersList || [];
+  return `
+<div>
+  <div class="flex-between mb-12">
+    <div class="section-label">All Users — ${users.length} total</div>
+    <button class="btn btn-ghost btn-sm" id="admin-users-refresh">↻ Refresh</button>
+  </div>
+  ${users.map(u => {
+    const isSelf = u.id === app.currentUser?.id;
+    return `
+  <div class="card card-tight mb-8">
+    <div class="flex-between mb-6">
+      <div>
+        <div style="font-family:var(--font-semi);font-weight:700;font-size:15px;">${u.name}${!u.isActive ? ' <span style="color:var(--text-3);font-weight:400;font-size:12px;">(inactive)</span>' : ''}${isSelf ? ' <span style="color:var(--amber);font-weight:400;font-size:12px;">(you)</span>' : ''}</div>
+        <div style="font-size:13px;color:var(--text-2);margin-top:2px;">${u.email}</div>
+      </div>
+      <span class="badge" style="background:var(--bg-3);color:var(--text-1);border:1px solid var(--border-0);text-transform:uppercase;">${u.role}</span>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+      <button class="btn btn-secondary btn-sm" data-user-toggle-active="${u.id}" data-active="${u.isActive}" ${isSelf ? 'disabled' : ''}
+        style="font-size:12px;padding:6px 12px;${isSelf ? 'opacity:0.3;' : ''}">${u.isActive ? 'Deactivate' : 'Reactivate'}</button>
+      <button class="btn btn-secondary btn-sm" data-user-reset="${u.id}" data-email="${u.email}" style="font-size:12px;padding:6px 12px;">Send Reset</button>
+      <button class="btn btn-ghost btn-sm" data-user-delete="${u.id}" data-email="${u.email}" ${isSelf ? 'disabled' : ''}
+        style="font-size:12px;padding:6px 12px;color:var(--red);border-color:var(--red);${isSelf ? 'opacity:0.3;' : ''}">Delete</button>
+    </div>
+  </div>`;
+  }).join('')}
+</div>`;
+}
+
 /* ================================================================
    SCREEN: PRESENTATION PRICE
    Gates every path to the customer view — a price gets picked once,
@@ -3712,6 +3785,50 @@ function attachEvents() {
   on('login-btn', 'click', handleLogin);
   on('login-pass', 'keydown', e => { if (e.key === 'Enter') handleLogin(); });
   on('login-user', 'keydown', e => { if (e.key === 'Enter') document.getElementById('login-pass')?.focus(); });
+  on('forgot-password-link', 'click', () => {
+    app.forgotPasswordSent = false;
+    navigate('forgot-password');
+  });
+
+  // ---- FORGOT / RESET PASSWORD ----
+  on('back-to-login-btn', 'click', () => {
+    app.loginError = '';
+    app.forgotPasswordSent = false;
+    navigate('login');
+  });
+  on('send-reset-btn', 'click', async () => {
+    const email = document.getElementById('forgot-email')?.value.trim();
+    const errEl = document.getElementById('forgot-error');
+    if (!email) { if (errEl) errEl.textContent = 'Please enter your email.'; return; }
+    const btn = document.getElementById('send-reset-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+    const redirectTo = window.location.origin + window.location.pathname;
+    await sb.auth.resetPasswordForEmail(email, { redirectTo });
+    app.forgotPasswordSent = true;
+    render();
+  });
+  on('set-new-password-btn', 'click', async () => {
+    const pw = document.getElementById('new-password')?.value || '';
+    const pwConfirm = document.getElementById('new-password-confirm')?.value || '';
+    const errEl = document.getElementById('new-password-error');
+    if (pw.length < 8) { if (errEl) errEl.textContent = 'Password must be at least 8 characters.'; return; }
+    if (pw !== pwConfirm) { if (errEl) errEl.textContent = 'Passwords do not match.'; return; }
+    const btn = document.getElementById('set-new-password-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    const { error } = await sb.auth.updateUser({ password: pw });
+    if (error) {
+      if (errEl) errEl.textContent = 'Could not update password. Request a new reset link and try again.';
+      if (btn) { btn.disabled = false; btn.textContent = 'Set New Password'; }
+      return;
+    }
+    app.passwordUpdated = true;
+    render();
+  });
+  on('new-password-continue-btn', 'click', async () => {
+    app.passwordUpdated = false;
+    await sb.auth.signOut();
+    navigate('login');
+  });
 
   // ---- HOME ----
   on('start-new-quote', 'click', () => {
@@ -4350,7 +4467,45 @@ function attachEvents() {
   delegate('[data-tab]', 'click', e => {
     app.activeTab = parseInt(e.currentTarget.dataset.tab);
     app.editMode = null;
+    if (app.activeTab === 5 && !app.adminUsersList && !app.adminUsersLoading) {
+      loadAdminUsers();
+    }
     render();
+  });
+
+  // ---- ADMIN: USERS ----
+  on('admin-users-refresh', 'click', () => loadAdminUsers());
+  on('admin-users-retry', 'click', () => loadAdminUsers());
+  delegate('[data-user-toggle-active]', 'click', async e => {
+    const id = e.currentTarget.dataset.userToggleActive;
+    const isActive = e.currentTarget.dataset.active === 'true';
+    if (id === app.currentUser.id) { alert("You can't deactivate your own account."); return; }
+    if (isActive && !confirm('Deactivate this user? They will not be able to log in.')) return;
+    const { error } = await sb.from('profiles').update({ is_active: !isActive }).eq('id', id);
+    if (error) { alert('Failed to update: ' + error.message); return; }
+    const u = app.adminUsersList?.find(x => x.id === id);
+    if (u) u.isActive = !isActive;
+    render();
+  });
+  delegate('[data-user-reset]', 'click', async e => {
+    const email = e.currentTarget.dataset.email;
+    if (!confirm(`Send a password reset email to ${email}?`)) return;
+    const redirectTo = window.location.origin + window.location.pathname;
+    await sb.auth.resetPasswordForEmail(email, { redirectTo });
+    alert(`Reset email sent to ${email}.`);
+  });
+  delegate('[data-user-delete]', 'click', async e => {
+    const id = e.currentTarget.dataset.userDelete;
+    const email = e.currentTarget.dataset.email;
+    if (id === app.currentUser.id) { alert("You can't delete your own account."); return; }
+    if (!confirm(`Permanently delete ${email}? This cannot be undone.`)) return;
+    try {
+      await callAdminUserAction('delete', { userId: id });
+      app.adminUsersList = (app.adminUsersList || []).filter(x => x.id !== id);
+      render();
+    } catch (err) {
+      alert('Could not delete: ' + err.message);
+    }
   });
 
 }
@@ -4385,33 +4540,54 @@ function attachCustomerViewEvents() {
 /* ================================================================
    AUTH
 ================================================================ */
+// Sets the login error via app state (not a direct DOM write) since a
+// sign-out mid-flow (deactivated account) triggers the global SIGNED_OUT
+// listener's navigate('login'), which re-renders the screen from scratch
+// and would silently wipe out any text written directly into the DOM.
+function setLoginError(msg) {
+  app.loginError = msg;
+  const errEl = document.getElementById('login-error');
+  if (errEl) errEl.textContent = msg; // best-effort immediate paint
+  const btn = document.getElementById('login-btn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Sign In →'; }
+}
+
 async function handleLogin() {
   const email    = document.getElementById('login-user')?.value.trim();
   const password = document.getElementById('login-pass')?.value;
-  const errEl    = document.getElementById('login-error');
   const btn      = document.getElementById('login-btn');
 
   if (!email || !password) {
-    if (errEl) errEl.textContent = 'Please enter your email and password.';
+    setLoginError('Please enter your email and password.');
     return;
   }
 
   if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
-  if (errEl) errEl.textContent = '';
+  app.loginError = '';
+  const errElClear = document.getElementById('login-error');
+  if (errElClear) errElClear.textContent = '';
 
   const { data, error } = await sb.auth.signInWithPassword({ email, password });
 
   if (error) {
-    if (errEl) errEl.textContent = 'Invalid email or password.';
-    if (btn) { btn.disabled = false; btn.textContent = 'Sign In →'; }
+    setLoginError('Invalid email or password.');
     return;
   }
 
   const { data: profile } = await sb
     .from('profiles')
-    .select('name, role')
+    .select('name, role, is_active')
     .eq('id', data.user.id)
     .single();
+
+  // A deactivated account still has valid credentials — signInWithPassword
+  // succeeds before we can catch this, so it needs its own message and an
+  // explicit sign-out rather than looking like a generic login failure.
+  if (profile && profile.is_active === false) {
+    await sb.auth.signOut();
+    setLoginError('This account has been deactivated. Contact your admin.');
+    return;
+  }
 
   app.currentUser = {
     id:   data.user.id,
@@ -4699,6 +4875,43 @@ async function deleteAdminQuote(quoteId) {
 }
 
 /* ================================================================
+   ADMIN USER MANAGEMENT — via the admin-user-actions Edge Function
+   (list users w/ email, delete). Deactivate/reactivate and password
+   reset are plain client-side calls — see attachEvents handlers.
+================================================================ */
+async function callAdminUserAction(action, extra = {}) {
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-user-actions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.access_token}`,
+      'apikey': SUPABASE_KEY,
+    },
+    body: JSON.stringify({ action, ...extra }),
+  });
+  const result = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(result.error || 'Action failed');
+  return result;
+}
+
+async function loadAdminUsers() {
+  if (app.adminUsersLoading) return;
+  app.adminUsersLoading = true;
+  app.adminUsersError = null;
+  render();
+  try {
+    const result = await callAdminUserAction('list');
+    app.adminUsersList = result.users;
+  } catch (e) {
+    app.adminUsersError = e.message || 'Failed to load users';
+  } finally {
+    app.adminUsersLoading = false;
+    render();
+  }
+}
+
+/* ================================================================
    ONLINE/OFFLINE DETECTION
 ================================================================ */
 window.addEventListener('online', () => {
@@ -4721,14 +4934,19 @@ async function init() {
     if (session) {
       const { data: profile } = await sb
         .from('profiles')
-        .select('name, role')
+        .select('name, role, is_active')
         .eq('id', session.user.id)
         .single();
-      app.currentUser = {
-        id:   session.user.id,
-        name: profile?.name || session.user.email,
-        role: profile?.role || 'tech',
-      };
+      if (profile && profile.is_active === false) {
+        await sb.auth.signOut();
+        app.loginError = 'This account has been deactivated. Contact your admin.';
+      } else {
+        app.currentUser = {
+          id:   session.user.id,
+          name: profile?.name || session.user.email,
+          role: profile?.role || 'tech',
+        };
+      }
     }
   } catch (e) {
     console.warn('Session restore failed', e);
@@ -4748,6 +4966,12 @@ sb.auth.onAuthStateChange((event) => {
     app.currentUser = null;
     app.draft = null;
     navigate('login');
+  } else if (event === 'PASSWORD_RECOVERY') {
+    // Fires when the user lands here via the emailed reset link — the SDK
+    // has already parsed the URL fragment and established a temporary
+    // recovery session, so route straight to the set-new-password screen.
+    app.passwordUpdated = false;
+    navigate('set-new-password');
   }
 });
 
