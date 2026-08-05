@@ -1685,23 +1685,39 @@ async function doSyncQuote(quote, panes) {
   }
 }
 
+// Ensures writes for the same quote never land out of order — autosave can
+// fire several times in quick succession (e.g. adding panes back-to-back),
+// and a slow request from an earlier edit landing after a faster one from a
+// later edit would silently revert the quote. Different quotes still sync
+// independently/concurrently; only same-id writes are serialized.
+const _syncChains = {};
+
+function chainedSync(id, fn) {
+  const prev = _syncChains[id] || Promise.resolve();
+  const next = prev.then(fn, fn); // run fn even if the previous link in the chain failed
+  _syncChains[id] = next.catch(() => {}); // swallow so a failure never breaks the chain for later writes
+  return next;
+}
+
 // Public entry point for persisting a quote. Queues the write instead of
 // losing it whenever the network isn't actually reachable — either because
 // we're offline, or because isOnline said true but the request failed
 // anyway (weak signal, captive portal, etc).
-async function syncQuoteToSupabase(quote, panes) {
+function syncQuoteToSupabase(quote, panes) {
   saveState(appData);
   if (!app.isOnline) {
     queuePendingSync(quote, panes);
-    return;
+    return Promise.resolve();
   }
-  try {
-    await doSyncQuote(quote, panes);
-    unqueuePendingSync(quote.id);
-  } catch (e) {
-    console.warn('Sync failed, queued for retry', e);
-    queuePendingSync(quote, panes);
-  }
+  return chainedSync(quote.id, async () => {
+    try {
+      await doSyncQuote(quote, panes);
+      unqueuePendingSync(quote.id);
+    } catch (e) {
+      console.warn('Sync failed, queued for retry', e);
+      queuePendingSync(quote, panes);
+    }
+  });
 }
 
 // Replays any writes that couldn't reach Supabase earlier. Must be awaited
@@ -1712,13 +1728,15 @@ async function flushPendingSync() {
   const queue = loadPendingSync();
   for (const id of Object.keys(queue)) {
     const { quote, panes } = queue[id];
-    try {
-      await doSyncQuote(quote, panes);
-      unqueuePendingSync(id);
-    } catch (e) {
-      console.warn('Flush failed for quote', id, e);
-      // left queued — will retry on the next flush
-    }
+    await chainedSync(id, async () => {
+      try {
+        await doSyncQuote(quote, panes);
+        unqueuePendingSync(id);
+      } catch (e) {
+        console.warn('Flush failed for quote', id, e);
+        // left queued — will retry on the next flush
+      }
+    });
   }
 }
 
@@ -2239,7 +2257,7 @@ function renderNewQuoteStep1() {
 <div class="screen" style="background:var(--bg-0);">
   <div class="app-header">
     <button class="header-back-btn" id="${d.isAdminEdit ? 'back-to-quote-detail' : 'back-home'}">←</button>
-    <div class="header-title">${d.isAdminEdit ? 'Edit Pane' : 'New Quote'}</div>
+    <div class="header-title">${d.isAdminEdit ? (isEditing ? 'Edit Pane' : 'New Pane') : 'New Quote'}</div>
     <div class="header-right">${headerNavIcons()}</div>
   </div>
   ${d.isAdminEdit ? '' : stepIndicator(0)}
@@ -2268,7 +2286,7 @@ function renderNewQuoteStep1() {
     <!-- PANE TABS -->
     ${d.panes.length>0?`
     <div class="pane-tab-strip">
-      ${!d.isAdminEdit ? `<button class="pane-tab ${!isEditing?'active':''}" id="pane-tab-new">+ New</button>` : ''}
+      <button class="pane-tab ${!isEditing?'active':''}" id="pane-tab-new">+ New</button>
       ${d.panes.map((p,i)=>`
         <button class="pane-tab ${isEditing&&d.editingPaneIdx===i?'active':''}" data-edit-pane-idx="${i}">
           ${i+1}${p.location?' · '+p.location.slice(0,8):''}
@@ -3160,7 +3178,11 @@ function renderQuoteDetail() {
             <span style="font-family:var(--font-semi);font-weight:700;font-size:15px;">Pane ${i + 1}${p.location ? ' · ' + p.location : ''}</span>
             <div style="font-size:12px;color:var(--text-2);margin-top:2px;">${label}${qty > 1 ? ' · Qty ' + qty : ''}</div>
           </div>
-          <button class="btn btn-secondary btn-sm" data-admin-edit-pane="${i}" style="font-size:12px;padding:6px 14px;">Edit Pane</button>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-secondary btn-sm" data-admin-edit-pane="${i}" style="font-size:12px;padding:6px 14px;">Edit Pane</button>
+            <button class="btn btn-ghost btn-sm" data-admin-remove-pane="${i}" ${d.panes.length <= 1 ? 'disabled' : ''}
+              style="font-size:12px;padding:6px 10px;color:var(--red);border-color:var(--red);${d.panes.length <= 1 ? 'opacity:0.3;' : ''}" title="${d.panes.length <= 1 ? 'A quote needs at least one pane' : 'Remove pane'}">✕</button>
+          </div>
         </div>
         <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">
           ${fmtMeasured(p.widthWhole || p.width, p.widthFrac || '')}" × ${fmtMeasured(p.heightWhole || p.height, p.heightFrac || '')}"
@@ -3175,6 +3197,8 @@ function renderQuoteDetail() {
         </div>
       </div>`;
     }).join('')}
+
+    <button class="btn btn-secondary btn-full mb-8" id="quote-detail-add-pane">+ Add Pane</button>
 
     <!-- Totals -->
     <div class="card mt-8" style="border-color:var(--amber);background:var(--amber-bg);">
@@ -3191,8 +3215,12 @@ function renderQuoteDetail() {
   </div>
 
   <!-- Action Bar -->
-  ${app.currentUser?.role === 'admin' ? `
   <div class="action-bar" style="flex-direction:column;gap:10px;">
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" id="show-customer-btn" style="flex:1;">👁 Show Customer</button>
+      <button class="btn btn-primary" id="send-quote-btn" style="flex:2;">📤 ${d.status === 'draft' ? 'Send Quote' : 'Re-send Updated Quote'}</button>
+    </div>
+    ${app.currentUser?.role === 'admin' ? `
     <div style="font-size:12px;color:var(--text-2);font-family:var(--font-semi);font-weight:600;letter-spacing:0.05em;">QUOTE STATUS</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       ${['draft','sent','shown','flagged'].map(s => `
@@ -3203,12 +3231,11 @@ function renderQuoteDetail() {
       <button class="btn btn-ghost btn-sm" id="admin-delete-btn" style="flex:1;color:var(--red);border-color:var(--red);">🗑 Delete</button>
       <button class="btn btn-primary" id="admin-edit-save" style="flex:2;">✓ Save Quote</button>
     </div>
-  </div>
-  ` : `
-  <div class="action-bar">
+    ` : `
     <button class="btn btn-primary btn-full" id="tech-save-detail">✓ Save Changes</button>
+    `}
   </div>
-  `}
+  ${app.sendModal ? renderSendModal(jobCalc) : ''}
 </div>`;
 }
 
@@ -3431,18 +3458,26 @@ function attachEvents() {
 
   // ---- NEW QUOTE STEP 1 ----
   on('back-home', 'click', () => {
-    if (app.draft && (app.draft.customerName || app.draft.panes.length > 0)) {
-      if (!confirm('Leave this quote? Progress will be lost.')) return;
-    }
+    if (hasUnsavedRisk() && !confirm('Discard this quote? Nothing has been saved yet.')) return;
     app.draft = null;
     navigate('home');
   });
 
+  // Debounced autosave for customer-info fields — a pane action has already
+  // synced the draft by the time these matter, so this only fires once
+  // there's something worth attaching the info to.
+  const debouncedCustomerAutosave = () => {
+    const d = app.draft;
+    if (!d || d.isAdminEdit || d.panes.length === 0) return;
+    clearTimeout(app._customerAutosaveTimer);
+    app._customerAutosaveTimer = setTimeout(() => autosaveDraft(d), 600);
+  };
+
   // Job-level inputs
-  on('cust-name',         'input',  e => app.draft.customerName    = e.target.value);
-  on('cust-contact',      'input',  e => app.draft.customerContact = e.target.value);
-  on('cust-contact-type', 'change', e => app.draft.contactType     = e.target.value);
-  on('job-num',           'input',  e => app.draft.jobNum          = e.target.value);
+  on('cust-name',         'input',  e => { app.draft.customerName    = e.target.value; debouncedCustomerAutosave(); });
+  on('cust-contact',      'input',  e => { app.draft.customerContact = e.target.value; debouncedCustomerAutosave(); });
+  on('cust-contact-type', 'change', e => { app.draft.contactType     = e.target.value; debouncedCustomerAutosave(); });
+  on('job-num',           'input',  e => { app.draft.jobNum          = e.target.value; debouncedCustomerAutosave(); });
 
   // Deferred render for price preview — fires only after the user has stopped interacting
   const deferredRender = () => {
@@ -3734,28 +3769,28 @@ function attachEvents() {
       d.panes[d.editingPaneIdx] = { id: d.panes[d.editingPaneIdx].id, ...cp };
       d.editingPaneIdx = null;
       d.currentPane = freshPane();
+    } else {
+      if (d.panes.length >= 20) { alert('Maximum 20 panes per quote.'); return; }
+      d.panes.push({ id: genPaneId(), ...cp });
+      d.currentPane = freshPane(cp);
+    }
 
-      if (d.isAdminEdit) {
-        // Recalculate totals and sync, then return to quote detail
-        const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' });
-        d.totalProduct   = jobCalc.totalProduct;
-        d.totalLabor     = jobCalc.totalLabor;
-        d.totalMaterials = jobCalc.totalMaterials;
-        d.grandTotal     = jobCalc.grandTotal;
-        appData.quotes = appData.quotes.map(q => q.id === d.id ? { ...d } : q);
-        saveState(appData);
-        syncQuoteToSupabase(d, d.panes);
-        navigate('quote-detail');
-        return;
-      }
-
-      render();
+    if (d.isAdminEdit) {
+      // Recalculate totals and sync, then return to quote detail — covers
+      // both adding a genuinely new pane and editing an existing one.
+      const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' });
+      d.totalProduct   = jobCalc.totalProduct;
+      d.totalLabor     = jobCalc.totalLabor;
+      d.totalMaterials = jobCalc.totalMaterials;
+      d.grandTotal     = jobCalc.grandTotal;
+      appData.quotes = appData.quotes.map(q => q.id === d.id ? { ...d } : q);
+      saveState(appData);
+      syncQuoteToSupabase(d, d.panes);
+      navigate('quote-detail');
       return;
     }
 
-    if (d.panes.length >= 20) { alert('Maximum 20 panes per quote.'); return; }
-    d.panes.push({ id: genPaneId(), ...cp });
-    d.currentPane = freshPane(cp);
+    autosaveDraft(d);
     render();
   });
 
@@ -3771,6 +3806,7 @@ function attachEvents() {
         d.panes.push({ id: genPaneId(), ...cp });
         d.currentPane = freshPane(cp);
         d.editingPaneIdx = null;
+        autosaveDraft(d);
       }
     }
     if (d.panes.length === 0) return;
@@ -3801,12 +3837,15 @@ function attachEvents() {
   });
   delegate('[data-remove-pane]', 'click', e => {
     const pid = e.currentTarget.dataset.removePane;
-    app.draft.panes = app.draft.panes.filter(p => p.id !== pid);
-    if (app.draft.editingPaneIdx !== null) app.draft.editingPaneIdx = null;
-    if (app.draft.panes.length === 0) {
-      app.draft.step = 1;
+    const d = app.draft;
+    d.panes = d.panes.filter(p => p.id !== pid);
+    if (d.editingPaneIdx !== null) d.editingPaneIdx = null;
+    if (d.panes.length === 0) {
+      deleteDraftIfEmpty(d.id);
+      d.step = 1;
       navigate('new-quote');
     } else {
+      autosaveDraft(d);
       render();
     }
   });
@@ -3843,6 +3882,31 @@ function attachEvents() {
     navigate('new-quote');
   });
 
+  on('quote-detail-add-pane', 'click', () => {
+    const d = app.draft;
+    d.editingPaneIdx = null;
+    d.currentPane = freshPane();
+    d.step = 1;
+    navigate('new-quote');
+  });
+
+  delegate('[data-admin-remove-pane]', 'click', e => {
+    const idx = parseInt(e.currentTarget.dataset.adminRemovePane);
+    const d = app.draft;
+    if (d.panes.length <= 1) return; // a quote needs at least one pane
+    if (!confirm('Remove this pane from the quote?')) return;
+    d.panes.splice(idx, 1);
+    const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' });
+    d.totalProduct   = jobCalc.totalProduct;
+    d.totalLabor     = jobCalc.totalLabor;
+    d.totalMaterials = jobCalc.totalMaterials;
+    d.grandTotal     = jobCalc.grandTotal;
+    appData.quotes = appData.quotes.map(q => q.id === d.id ? { ...d } : q);
+    saveState(appData);
+    syncQuoteToSupabase(d, d.panes);
+    render();
+  });
+
   // Step 2 pane list edit button
   delegate('[data-edit-pane-step2]', 'click', e => {
     const idx = parseInt(e.currentTarget.dataset.editPaneStep2);
@@ -3853,25 +3917,26 @@ function attachEvents() {
     render();
   });
 
-  // Persistent header nav
+  // Persistent header nav.
+  // A draft is autosaved the moment it has its first pane, so once
+  // panes.length > 0 there's nothing left to lose by navigating away — it's
+  // already resumable from Job Log. Only a customer name typed with zero
+  // panes yet is genuinely still at risk, since autosave hasn't kicked in.
+  const hasUnsavedRisk = () =>
+    app.draft && !app.draft.isAdminEdit && app.draft.panes?.length === 0 && !!app.draft.customerName;
+
   delegate('[data-nav-new-quote]', 'click', () => {
-    if (app.draft && (app.draft.customerName || app.draft.panes?.length > 0) && !app.draft.isAdminEdit) {
-      if (!confirm('Start a new quote? Current draft will be discarded.')) return;
-    }
+    if (hasUnsavedRisk() && !confirm('Discard this quote? Nothing has been saved yet.')) return;
     app.draft = newDraft();
     navigate('new-quote');
   });
   delegate('[data-nav-home]', 'click', () => {
-    if (app.draft && (app.draft.customerName || app.draft.panes?.length > 0) && !app.draft.isAdminEdit) {
-      if (!confirm('Leave this quote? Unsaved changes will be lost.')) return;
-    }
+    if (hasUnsavedRisk() && !confirm('Discard this quote? Nothing has been saved yet.')) return;
     app.draft = null;
     navigate('home');
   });
   delegate('[data-nav-history]', 'click', () => {
-    if (app.draft && (app.draft.customerName || app.draft.panes?.length > 0) && !app.draft.isAdminEdit) {
-      if (!confirm('Leave this quote? Unsaved changes will be lost.')) return;
-    }
+    if (hasUnsavedRisk() && !confirm('Discard this quote? Nothing has been saved yet.')) return;
     if (!app.draft?.isAdminEdit) app.draft = null;
     navigate('history');
   });
@@ -3906,10 +3971,7 @@ function attachEvents() {
     if (e.target.id === 'send-modal-overlay') { app.sendModal = false; render(); }
   });
   on('close-send-modal', 'click', () => { app.sendModal = false; render(); });
-  on('send-sms-btn', 'click', () => {
-    const finalQuote = finalizeDraft('sent');
-    navigate('sent', { quoteId: finalQuote.id });
-  });
+  on('send-sms-btn', 'click', () => completeSendAction('sent'));
   on('show-screen-btn', 'click', () => {
     // Show presentation first, then save as 'shown' when closed
     app.pendingSaveAsShown = true;
@@ -3924,8 +3986,7 @@ function attachEvents() {
     if (!contact) { alert('Please enter a contact to send to.'); return; }
     app.draft.customerContact = contact;
     app.draft.contactType = type;
-    const finalQuote = finalizeDraft('sent');
-    navigate('sent', { quoteId: finalQuote.id });
+    completeSendAction('sent');
   });
 
   // Admin edit actions
@@ -3979,11 +4040,10 @@ function attachCustomerViewEvents() {
   if (closeBtn) {
     closeBtn.addEventListener('click', () => {
       if (app.pendingSaveAsShown) {
-        const finalQuote = finalizeDraft('shown');
         app.pendingSaveAsShown = false;
         app.customerViewOpen = false;
         app.customerViewQuoteId = null;
-        navigate('sent', { quoteId: finalQuote.id });
+        completeSendAction('shown');
       } else {
         app.customerViewOpen = false;
         app.customerViewQuoteId = null;
@@ -4035,6 +4095,62 @@ async function handleLogin() {
   await flushPendingSync();
   await loadQuotes();
   navigate('home');
+}
+
+/* ================================================================
+   AUTOSAVE — persist an in-progress (pre-send) draft as it's built
+================================================================ */
+// Fires after the first pane is added and on every pane add/edit/remove
+// after that, so a tech can resume from Job Log if the app closes before
+// they reach Send. Only for a fresh draft (never isAdminEdit — a reopened
+// quote already has its own sync-on-edit path). Status stays 'draft' and
+// the job total is left unrounded, same as every other estimating screen.
+function autosaveDraft(d) {
+  if (!d || d.isAdminEdit) return;
+  const jobCalc = calcJob(d.panes, d.supplier);
+  const existing = appData.quotes.find(q => q.id === d.id);
+  const quote = {
+    id:              d.id,
+    techId:          app.currentUser.id,
+    techName:        app.currentUser.name,
+    customerName:    d.customerName,
+    customerContact: d.customerContact,
+    contactType:     d.contactType,
+    jobDate:         d.jobDate,
+    jobNum:          d.jobNum || '',
+    notes:           d.notes || '',
+    toolsRequired:   d.toolsRequired || '',
+    status:          'draft',
+    supplier:        d.supplier,
+    panes:           d.panes,
+    totalProduct:    jobCalc.totalProduct,
+    totalLabor:      jobCalc.totalLabor,
+    totalMaterials:  jobCalc.totalMaterials,
+    grandTotal:      jobCalc.grandTotal,
+    catalogVersion:  d.catalogVersion,
+    createdAt:       existing?.createdAt || new Date().toISOString(),
+    syncedAt:        app.isOnline ? new Date().toISOString() : null,
+  };
+  appData.quotes = appData.quotes.filter(q => q.id !== quote.id);
+  appData.quotes.unshift(quote);
+  saveState(appData);
+  syncQuoteToSupabase(quote, quote.panes);
+}
+
+// A draft that's been edited back down to zero panes has nothing worth
+// keeping remotely — clean up both the local record and Supabase rather
+// than leave a phantom empty draft sitting in Job Log.
+async function deleteDraftIfEmpty(id) {
+  if (!appData.quotes.some(q => q.id === id)) return; // never synced, nothing to clean up
+  appData.quotes = appData.quotes.filter(q => q.id !== id);
+  saveState(appData);
+  unqueuePendingSync(id);
+  if (app.isOnline) {
+    try {
+      await sb.from('panes').delete().eq('quote_id', id);
+      await sb.from('quotes').delete().eq('id', id);
+    } catch (e) { console.warn('Failed to clean up empty draft', e); }
+  }
 }
 
 /* ================================================================
@@ -4099,6 +4215,7 @@ function viewQuoteFromHistory(quoteId) {
     step: 3,
     catalogVersion: q.catalogVersion,
     status: q.status,
+    createdAt: q.createdAt,
     techId: q.techId,
     techName: q.techName,
     isAdminEdit: true,
@@ -4109,6 +4226,57 @@ function viewQuoteFromHistory(quoteId) {
 /* ================================================================
    ADMIN EDIT / DELETE
 ================================================================ */
+// Send/Show/Present from a *reopened* quote (Quote Detail) — deliberately
+// separate from finalizeDraft(), which always stamps techId/techName from
+// whoever is currently logged in and always resets createdAt. Reusing it
+// here would silently reassign ownership to whoever clicks Send, and reset
+// the quote's original creation date every time it's re-sent. This keeps
+// the original tech and creation date, and only updates status/totals.
+function updateQuoteStatus(status) {
+  const d = app.draft;
+  if (!d || !d.isAdminEdit) return null;
+  const jobCalc = calcJob(d.panes, d.supplier, { rounded: true });
+  const updated = {
+    id:              d.id,
+    techId:          d.techId,
+    techName:        d.techName,
+    customerName:    d.customerName,
+    customerContact: d.customerContact,
+    contactType:     d.contactType,
+    jobDate:         d.jobDate,
+    jobNum:          d.jobNum || '',
+    notes:           d.notes || '',
+    toolsRequired:   d.toolsRequired || '',
+    status:          status,
+    supplier:        d.supplier,
+    panes:           d.panes,
+    totalProduct:    jobCalc.totalProduct,
+    totalLabor:      jobCalc.totalLabor,
+    totalMaterials:  jobCalc.totalMaterials,
+    grandTotal:      jobCalc.grandTotal,
+    catalogVersion:  d.catalogVersion,
+    createdAt:       d.createdAt,
+    syncedAt:        app.isOnline ? new Date().toISOString() : null,
+  };
+  appData.quotes = appData.quotes.map(q => q.id === updated.id ? updated : q);
+  saveState(appData);
+  app.draft = null;
+  syncQuoteToSupabase(updated, updated.panes);
+  return updated;
+}
+
+// Shared by every Send/Show-on-screen completion point (SMS/email send,
+// manual-contact send, and "shown" on customer-view close). Routes to
+// finalizeDraft (fresh quote → Sent confirmation screen) or
+// updateQuoteStatus (reopened quote → back to Home, matching Save's
+// existing navigation) depending on how we got here.
+function completeSendAction(status) {
+  const isReopen = !!app.draft?.isAdminEdit;
+  const finalQuote = isReopen ? updateQuoteStatus(status) : finalizeDraft(status);
+  if (isReopen) navigate('home');
+  else navigate('sent', { quoteId: finalQuote.id });
+}
+
 async function saveAdminEdit() {
   const d = app.draft;
   if (!d || !d.isAdminEdit) return;
