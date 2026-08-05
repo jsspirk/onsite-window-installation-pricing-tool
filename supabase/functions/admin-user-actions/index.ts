@@ -74,6 +74,33 @@ Deno.serve(async (req) => {
       return json({ users });
     }
 
+    if (body.action === 'create') {
+      const { email, password, name, role } = body;
+      if (!email || !password) return json({ error: 'email and password are required' }, 400);
+      if (role && role !== 'tech' && role !== 'admin') {
+        return json({ error: "role must be 'tech' or 'admin'" }, 400);
+      }
+
+      // email_confirm: true skips the confirmation-email step entirely —
+      // this is the admin-provisioning path, not self-signup, so there's
+      // no email round-trip (and nothing to hit the project's email
+      // rate limit).
+      const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      });
+      if (createErr) return json({ error: createErr.message }, 500);
+
+      const newId = created.user.id;
+      const { error: profileErr } = await supabaseAdmin
+        .from('profiles')
+        .upsert({ id: newId, name: name || email, role: role || 'tech', is_active: true });
+      if (profileErr) return json({ error: profileErr.message }, 500);
+
+      return json({ user: { id: newId, email, name: name || email, role: role || 'tech', isActive: true } });
+    }
+
     if (body.action === 'delete') {
       const targetId = body.userId;
       if (!targetId) return json({ error: 'userId is required' }, 400);
