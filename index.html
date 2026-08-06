@@ -2578,7 +2578,7 @@ function renderNewQuoteStep1() {
   ${d.isAdminEdit ? `
   <div class="action-bar">
     <button class="btn btn-primary btn-full" id="add-pane-btn" ${!canSave ? 'disabled' : ''}>
-      ✓ Update Pane
+      ${isEditing ? '✓ Update Pane' : '+ Add Pane'}
     </button>
     ${!canSave ? `<p style="text-align:center;font-size:13px;color:var(--text-3);margin-top:8px;">Select thickness, coating, finish and enter dimensions</p>` : ''}
   </div>
