@@ -101,6 +101,47 @@ Deno.serve(async (req) => {
       return json({ user: { id: newId, email, name: name || email, role: role || 'tech', isActive: true } });
     }
 
+    if (body.action === 'invite') {
+      // Product-facing "Add User": unlike 'create', the caller never
+      // supplies a password. A random one is generated here and never
+      // returned or logged — the new user sets their own via the emailed
+      // reset link, reusing the same self-service flow from Phase E.
+      const { email, name, role, redirectTo } = body;
+      if (!email) return json({ error: 'email is required' }, 400);
+      if (role && role !== 'tech' && role !== 'admin') {
+        return json({ error: "role must be 'tech' or 'admin'" }, 400);
+      }
+
+      const randomPassword = crypto.randomUUID() + crypto.randomUUID();
+      const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+        email,
+        password: randomPassword,
+        email_confirm: true,
+      });
+      if (createErr) return json({ error: createErr.message }, 500);
+
+      const newId = created.user.id;
+      const { error: profileErr } = await supabaseAdmin
+        .from('profiles')
+        .upsert({ id: newId, name: name || email, role: role || 'tech', is_active: true });
+      if (profileErr) return json({ error: profileErr.message }, 500);
+
+      const { error: resetErr } = await supabaseAdmin.auth.resetPasswordForEmail(
+        email,
+        redirectTo ? { redirectTo } : undefined,
+      );
+      if (resetErr) {
+        // Account and profile exist even though the invite email failed —
+        // say so plainly rather than reporting a clean success.
+        return json({
+          error: `Account created, but the invite email failed to send: ${resetErr.message}`,
+          user: { id: newId, email, name: name || email, role: role || 'tech', isActive: true },
+        }, 200);
+      }
+
+      return json({ user: { id: newId, email, name: name || email, role: role || 'tech', isActive: true } });
+    }
+
     if (body.action === 'delete') {
       const targetId = body.userId;
       if (!targetId) return json({ error: 'userId is required' }, 400);
