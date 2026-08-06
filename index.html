@@ -3777,6 +3777,20 @@ function attachEvents() {
   const delegate = (selector, ev, fn) => {
     document.querySelectorAll(selector).forEach(el => el.addEventListener(ev, fn));
   };
+  // render() does a full innerHTML replace, which destroys and recreates
+  // the input element — a plain `render()` on every keystroke would drop
+  // focus after each character, forcing a re-click to type the next one.
+  // Re-focus and restore the exact cursor position (not just append-to-end,
+  // so editing mid-string doesn't jump the cursor) right after re-render.
+  const onSearchInput = (id, stateSetter) => {
+    on(id, 'input', e => {
+      const cursorPos = e.target.selectionStart;
+      stateSetter(e.target.value);
+      render();
+      const el = document.getElementById(id);
+      if (el) { el.focus(); el.setSelectionRange(cursorPos, cursorPos); }
+    });
+  };
 
   // ---- THEME ----
   delegate('[data-theme-toggle]', 'click', toggleTheme);
@@ -4263,10 +4277,7 @@ function attachEvents() {
     app.draft.currentPane = freshPane();
     navigate('quote-detail');
   });
-  on('home-search', 'input', e => {
-    app.homeSearch = e.target.value;
-    render();
-  });
+  onSearchInput('home-search', v => { app.homeSearch = v; });
   delegate('[data-admin-edit-pane]', 'click', e => {
     const idx = parseInt(e.currentTarget.dataset.adminEditPane);
     const d = app.draft;
@@ -4453,17 +4464,11 @@ function attachEvents() {
 
   // ---- HISTORY ----
   on('back-home-from-history', 'click', () => navigate('home'));
-  on('history-search', 'input', e => {
-    app.historySearch = e.target.value;
-    render();
-  });
+  onSearchInput('history-search', v => { app.historySearch = v; });
 
   // ---- ADMIN ----
   on('back-home-admin', 'click', () => navigate('home'));
-  on('admin-quote-search', 'input', e => {
-    app.adminQuoteSearch = e.target.value;
-    render();
-  });
+  onSearchInput('admin-quote-search', v => { app.adminQuoteSearch = v; });
   delegate('[data-tab]', 'click', e => {
     app.activeTab = parseInt(e.currentTarget.dataset.tab);
     app.editMode = null;
