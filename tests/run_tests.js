@@ -217,6 +217,43 @@ function calcJob(panes, supplier, opts = {}) {
   };
 }
 
+function calcItemRanges(panes, supplier) {
+  const band  = appConfig.range_band || 0.08;
+  const floor = appConfig.min_job_cost ?? 400;
+  const items = panes
+    .filter(p => !p.excluded)
+    .map(p => {
+      const r = calcPane(p, supplier);
+      if (!r || r.requiresQuote) return null;
+      const base = r.roundedTotal;
+      return { pane: p, base, low: base * (1 - band), high: base * (1 + band) };
+    })
+    .filter(Boolean);
+  const rawLow  = items.reduce((s, it) => s + it.low, 0);
+  const rawHigh = items.reduce((s, it) => s + it.high, 0);
+  const totalLow  = Math.max(floor, rawLow);
+  const totalHigh = Math.max(floor, rawHigh);
+  const lowScale  = rawLow  > 0 ? totalLow  / rawLow  : 1;
+  const highScale = rawHigh > 0 ? totalHigh / rawHigh : 1;
+  return {
+    items: items.map(it => ({ ...it, low: it.low * lowScale, high: it.high * highScale })),
+    totalLow,
+    totalHigh,
+  };
+}
+
+function distributePrice(price, itemRanges) {
+  const { items, totalLow, totalHigh } = itemRanges;
+  const span = totalHigh - totalLow;
+  const frac = span > 0 ? Math.min(1, Math.max(0, (price - totalLow) / span)) : 0.5;
+  const rounded = items.map(it => +(it.low + frac * (it.high - it.low)).toFixed(2));
+  if (rounded.length > 0) {
+    const sumExceptLast = rounded.slice(0, -1).reduce((s, v) => s + v, 0);
+    rounded[rounded.length - 1] = +(price - sumExceptLast).toFixed(2);
+  }
+  return items.map((it, i) => ({ pane: it.pane, price: rounded[i] }));
+}
+
 const FRAC_OPTS = [
   { id: '',    label: '—',  val: 0   },
   { id: '1/8', label: '⅛', val: 1/8 },
@@ -1131,6 +1168,78 @@ test('an excluded pane with no valid rate (requiresQuote) still doesn\'t crash c
   const panes = [pane({ excluded: true, coating: 'other', unitType: 'single_pane' })];
   const job = calcJob(panes, 'busick');
   assert.strictEqual(job.grandTotal, 0);
+});
+
+// ─── R. Per-item ranges and price distribution (Phase 3) ─────────────────────
+
+test('calcItemRanges totalLow/totalHigh match summing raw grandTotal ± band (unfloored case)', () => {
+  const panes = [pane({ width: 40, height: 60 }), pane({ width: 36, height: 48 })];
+  const job = calcJob(panes, 'busick', { rounded: true });
+  const band = appConfig.range_band || 0.08;
+  const expectedLow  = job.grandTotal * (1 - band);
+  const expectedHigh = job.grandTotal * (1 + band);
+  const ranges = calcItemRanges(panes, 'busick');
+  assert.ok(Math.abs(ranges.totalLow - expectedLow) < 0.02);
+  assert.ok(Math.abs(ranges.totalHigh - expectedHigh) < 0.02);
+});
+test('per-item low/high sum exactly to totalLow/totalHigh (unfloored case)', () => {
+  const panes = [pane({ width: 40, height: 60 }), pane({ width: 36, height: 48 }), pane({ width: 20, height: 20 })];
+  const ranges = calcItemRanges(panes, 'busick');
+  const sumLow  = ranges.items.reduce((s, it) => s + it.low, 0);
+  const sumHigh = ranges.items.reduce((s, it) => s + it.high, 0);
+  assert.ok(Math.abs(sumLow - ranges.totalLow) < 0.01);
+  assert.ok(Math.abs(sumHigh - ranges.totalHigh) < 0.01);
+});
+test('min_job_cost floor still applies once to the total (small job)', () => {
+  const panes = [pane({ width: 6, height: 6 })];
+  const ranges = calcItemRanges(panes, 'busick');
+  const floor = appConfig.min_job_cost ?? 400;
+  assert.strictEqual(ranges.totalLow, floor);
+  assert.strictEqual(ranges.totalHigh, floor);
+});
+test('per-item ranges still sum exactly to the total even once the floor kicks in (proportional scaling)', () => {
+  const panes = [pane({ width: 6, height: 6 }), pane({ width: 8, height: 8 })];
+  const ranges = calcItemRanges(panes, 'busick');
+  const sumLow  = ranges.items.reduce((s, it) => s + it.low, 0);
+  const sumHigh = ranges.items.reduce((s, it) => s + it.high, 0);
+  assert.ok(Math.abs(sumLow - ranges.totalLow) < 0.01, `sumLow ${sumLow} should equal totalLow ${ranges.totalLow}`);
+  assert.ok(Math.abs(sumHigh - ranges.totalHigh) < 0.01, `sumHigh ${sumHigh} should equal totalHigh ${ranges.totalHigh}`);
+});
+test('distributePrice at totalLow gives every item its own low value', () => {
+  const panes = [pane({ width: 40, height: 60 }), pane({ width: 20, height: 30 })];
+  const ranges = calcItemRanges(panes, 'busick');
+  const dist = distributePrice(ranges.totalLow, ranges);
+  dist.forEach((d, i) => assert.ok(Math.abs(d.price - ranges.items[i].low) < 0.02));
+});
+test('distributePrice at totalHigh gives every item its own high value', () => {
+  const panes = [pane({ width: 40, height: 60 }), pane({ width: 20, height: 30 })];
+  const ranges = calcItemRanges(panes, 'busick');
+  const dist = distributePrice(ranges.totalHigh, ranges);
+  dist.forEach((d, i) => assert.ok(Math.abs(d.price - ranges.items[i].high) < 0.02));
+});
+test('distributePrice always sums to exactly the picked price, to the cent — the actual guarantee', () => {
+  // Three items with deliberately uneven costs so naive per-item rounding wouldn't line up
+  const panes = [pane({ width: 17, height: 23 }), pane({ width: 41, height: 29 }), pane({ width: 8, height: 55 })];
+  const ranges = calcItemRanges(panes, 'busick');
+  // A handful of prices between low and high, including awkward non-round ones
+  const candidates = [
+    ranges.totalLow,
+    ranges.totalHigh,
+    ranges.totalLow + (ranges.totalHigh - ranges.totalLow) * 0.37,
+    +((ranges.totalLow + ranges.totalHigh) / 2).toFixed(2),
+  ];
+  candidates.forEach(price => {
+    const dist = distributePrice(price, ranges);
+    const sum = +dist.reduce((s, d) => s + d.price, 0).toFixed(2);
+    assert.strictEqual(sum, +price.toFixed(2), `distributed items should sum to exactly ${price}, got ${sum}`);
+  });
+});
+test('distributePrice omits excluded panes entirely', () => {
+  const panes = [pane({ width: 24, height: 36 }), pane({ width: 30, height: 40, excluded: true })];
+  const ranges = calcItemRanges(panes, 'busick');
+  assert.strictEqual(ranges.items.length, 1);
+  const dist = distributePrice(ranges.totalLow, ranges);
+  assert.strictEqual(dist.length, 1);
 });
 
 // ─── Summary ─────────────────────────────────────────────────────────────────

@@ -1528,6 +1528,57 @@ function calcJob(panes, supplier, opts = {}) {
   };
 }
 
+// Per-item ranges that the job's low/high is built FROM, rather than a range
+// derived from the already-summed total. Because range_band is a flat ±%,
+// summing each item's own range is mathematically identical to ranging the
+// sum — EXCEPT once min_job_cost floors the total, at which point per-item
+// ranges no longer add up to the (floored) total on their own. Scaling each
+// item's range by the same ratio the total got floored by preserves both:
+// totalLow/totalHigh always match what rangeBounds(grandTotal) would've
+// given, and per-item ranges always sum exactly to them.
+function calcItemRanges(panes, supplier) {
+  const band  = appConfig.range_band || 0.08;
+  const floor = appConfig.min_job_cost ?? 400;
+  const items = panes
+    .filter(p => !p.excluded)
+    .map(p => {
+      const r = calcPane(p, supplier);
+      if (!r || r.requiresQuote) return null;
+      const base = r.roundedTotal; // matches calcJob({rounded:true})'s basis
+      return { pane: p, base, low: base * (1 - band), high: base * (1 + band) };
+    })
+    .filter(Boolean);
+  const rawLow  = items.reduce((s, it) => s + it.low, 0);
+  const rawHigh = items.reduce((s, it) => s + it.high, 0);
+  const totalLow  = Math.max(floor, rawLow);
+  const totalHigh = Math.max(floor, rawHigh);
+  const lowScale  = rawLow  > 0 ? totalLow  / rawLow  : 1;
+  const highScale = rawHigh > 0 ? totalHigh / rawHigh : 1;
+  return {
+    items: items.map(it => ({ ...it, low: it.low * lowScale, high: it.high * highScale })),
+    totalLow,
+    totalHigh,
+  };
+}
+
+// Given a price the tech picked somewhere in [totalLow, totalHigh], finds
+// that same fractional position in every item's own range so each item's
+// displayed price is consistent with the picked total, then forces an
+// exact-cent match (round every item but the last normally; the last item
+// absorbs the rounding remainder) so the customer-facing line items always
+// sum to exactly the price they were quoted — never off by a cent.
+function distributePrice(price, itemRanges) {
+  const { items, totalLow, totalHigh } = itemRanges;
+  const span = totalHigh - totalLow;
+  const frac = span > 0 ? Math.min(1, Math.max(0, (price - totalLow) / span)) : 0.5;
+  const rounded = items.map(it => +(it.low + frac * (it.high - it.low)).toFixed(2));
+  if (rounded.length > 0) {
+    const sumExceptLast = rounded.slice(0, -1).reduce((s, v) => s + v, 0);
+    rounded[rounded.length - 1] = +(price - sumExceptLast).toFixed(2);
+  }
+  return items.map((it, i) => ({ pane: it.pane, price: rounded[i] }));
+}
+
 function toIn(v, unit) { return unit === 'cm' ? parseFloat(v) * 0.393701 : parseFloat(v); }
 
 /* ================================================================
@@ -3354,6 +3405,7 @@ function renderQuoteDetail() {
   const isRounded = d.status !== 'draft';
   const isLocked  = d.status === 'approved';
   const jobCalc = calcJob(d.panes, d.supplier, { rounded: isRounded });
+  const itemRanges = calcItemRanges(d.panes, d.supplier);
   const statusMap = { sent: 'badge-sent', draft: 'badge-draft', flagged: 'badge-flagged', shown: 'badge-shown', approved: 'badge-approved' };
 
   return `
@@ -3439,7 +3491,7 @@ function renderQuoteDetail() {
       <div class="price-row"><span class="price-row-label">Total Labor</span><span class="price-row-value">${fmt(jobCalc.totalLabor)}</span></div>
       <div class="price-total-row">
         <span class="price-total-label">Estimate Range</span>
-        <span class="price-total-value" style="font-size:18px;">${fmtRange(jobCalc.grandTotal)}</span>
+        <span class="price-total-value" style="font-size:18px;">${fmt(itemRanges.totalLow)} – ${fmt(itemRanges.totalHigh)}</span>
       </div>
     </div>
 
@@ -3663,9 +3715,8 @@ function renderAdminUsers() {
 function renderPresentPrice() {
   const d = app.draft;
   if (!d) return '';
-  const jobCalc = calcJob(d.panes, d.supplier, { rounded: true });
   const inc = appConfig.round_increment || 25;
-  const { low, high } = rangeBounds(jobCalc.grandTotal);
+  const { totalLow: low, totalHigh: high } = calcItemRanges(d.panes, d.supplier);
   const incLow  = roundToIncrement(low, inc);
   const incHigh = roundToIncrement(high, inc);
   const mid     = roundToIncrement((low + high) / 2, inc);
@@ -3740,10 +3791,16 @@ function renderCustomerView(quoteId) {
     jobCalc = { totalProduct: q.totalProduct, totalLabor: q.totalLabor, totalMaterials: 0, grandTotal: q.grandTotal };
   }
 
-  const supplier  = q.supplier || getDefaultSupplier();
+  const supplier   = q.supplier || getDefaultSupplier();
+  const finalPrice = q.agreedPrice ?? q.grandTotal;
+  // Each item's price is finalPrice's exact position in the job's low/high
+  // range, applied to that item's own range — so item prices always sum to
+  // exactly what the customer is being quoted, whatever total was picked.
+  const distributed  = distributePrice(finalPrice, calcItemRanges(q.panes, supplier));
+  const priceByPaneId = Object.fromEntries(distributed.map(x => [x.pane.id, x.price]));
   const lineItems = q.panes.filter(p => !p.excluded).map((p, i) => {
     const r = calcPane(p, supplier);
-    return { ...p, ...(r && !r.requiresQuote ? r : {}), idx: i };
+    return { ...p, ...(r && !r.requiresQuote ? r : {}), idx: i, itemPrice: priceByPaneId[p.id] };
   });
 
   const brand = getBrand();
@@ -3767,9 +3824,12 @@ function renderCustomerView(quoteId) {
   <div class="cv-divider"></div>
 
   ${lineItems.map((item, i) => `
-  <div style="margin-bottom:10px;">
-    <div class="cv-label">Item ${i+1}${item.location?' — '+item.location:''}</div>
-    <div style="font-size:14px;color:var(--text-1);">${getPaneLabel(item)}${(item.qty||1)>1?' (×'+item.qty+')':''} · ${item.width}" × ${item.height}"</div>
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px;">
+    <div>
+      <div class="cv-label">Item ${i+1}${item.location?' — '+item.location:''}</div>
+      <div style="font-size:14px;color:var(--text-1);">${getPaneLabel(item)}${(item.qty||1)>1?' (×'+item.qty+')':''} · ${item.width}" × ${item.height}"</div>
+    </div>
+    <div style="font-size:15px;font-weight:700;color:#F59E0B;white-space:nowrap;">${item.itemPrice != null ? fmt(item.itemPrice) : ''}</div>
   </div>
   `).join('')}
 
