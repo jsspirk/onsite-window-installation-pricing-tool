@@ -114,13 +114,18 @@ codebase today is **single-tenant by construction**, and how far to
 generalize it depends on how soon a second client is real.
 
 ### The core blocker
-`PRICE_CATALOG` (suppliers, $/SF rate tables, grid adders, shape
+~~`PRICE_CATALOG` (suppliers, $/SF rate tables, grid adders, shape
 multipliers, glass weights, coating options) is hardcoded in `index.html`
 (~line 1190+). This is FastGlass-specific business data with no admin UI —
 unlike `markup_tiers`, `min_job_cost`, and branding, which already live in
 `app_config` and are admin-editable. A second client with different
 suppliers or rate structures currently means editing JS by hand, not
-configuring the app.
+configuring the app.~~ **Resolved 2026-08-06** — `PRICE_CATALOG` now lives
+in `app_config.price_catalog` (jsonb) with a full admin editor (Glass
+Types tab: per-supplier drill-down for rates/grid adder/markup; Labor &
+Pricing: labor rates; Materials: shape multipliers, glass weights, and
+heavy-lift thresholds). A new client's catalog is now a database
+seed/admin edit, not a code change.
 
 - [ ] **Decide the reuse model** before building anything further:
   - **Fork-per-client**: each client gets their own Supabase project +
@@ -136,11 +141,11 @@ configuring the app.
     clean template is almost certainly the right starting point** —
     don't build multi-tenant infrastructure speculatively. Revisit this
     once a second client is actually signed.
-- [ ] Move `PRICE_CATALOG` into `app_config` (jsonb, same pattern as
+- [x] Move `PRICE_CATALOG` into `app_config` (jsonb, same pattern as
       `markup_tiers`) with an admin editor UI, regardless of which reuse
       model you pick — this is valuable even for FastGlass alone (Joe/Eric
       could adjust supplier rates without a code deploy) and is the single
-      highest-leverage change for reusability.
+      highest-leverage change for reusability. **Done 2026-08-06.**
 - [ ] Parameterize `SUPABASE_URL` / `SUPABASE_KEY` (currently hardcoded
       constants at the top of `index.html`, line ~1179) so a new client
       deployment is "swap two values," not "edit and diff the file."
