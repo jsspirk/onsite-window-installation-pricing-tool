@@ -26,10 +26,11 @@ the repo and travel with the code, not go stale in a chat.
       memory of what they're supposed to do) — confirm techs truly can't
       read/write other techs' quotes, and that `panes`/`quotes`/`profiles`
       all have RLS *enabled*, not just policies defined.
-- [ ] Confirm Auth → URL Configuration (Site URL + Redirect URLs) is correct
+- [x] Confirm Auth → URL Configuration (Site URL + Redirect URLs) is correct
       for the real production domain — this already bit us once
       ([[project_fastglass]] has the incident). If the domain changes
-      before launch, this needs updating again.
+      before launch, this needs updating again. **Done 2026-08-07** —
+      updated to `fieldpricer.com` when the custom domain went live.
 - [ ] Review the default Supabase email templates (password reset, invite) —
       they're currently unbranded Supabase defaults, not FastGlass-branded.
 - [ ] Confirm minimum password length / password policy matches what you
@@ -72,10 +73,12 @@ the repo and travel with the code, not go stale in a chat.
       (name, icons, theme color pulling from `app_config.brand_color`) and
       a minimal service worker for the app shell if "Add to Home Screen"
       on a job site matters to you.
-- [ ] Custom domain instead of the `github.io` subdomain, if this is going
+- [x] Custom domain instead of the `github.io` subdomain, if this is going
       in front of real customers — cheap credibility win, and gives you a
       stable domain to put in the Supabase Auth Redirect URL list instead
-      of chasing it if hosting ever changes.
+      of chasing it if hosting ever changes. **Done 2026-08-07** —
+      `fieldpricer.com` live via GitHub Pages + Cloudflare DNS (verified
+      serving 200 over HTTPS).
 
 ---
 
