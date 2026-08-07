@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Reset your password</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#f4f4f6;padding:48px 16px 40px;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:520px;">
+
+          <!-- Logo -->
+          <tr>
+            <td align="center" style="padding-bottom:28px;">
+              <img
+                src="https://qulbihqeiuupydhzvsao.supabase.co/storage/v1/object/public/brand-assets/logos/horiz.png"
+                alt="FastGlass"
+                height="38"
+                style="height:38px;width:auto;max-width:200px;display:block;border:0;"
+              />
+            </td>
+          </tr>
+
+          <!-- Card -->
+          <tr>
+            <td style="background:#ffffff;border-radius:12px;padding:40px 40px 36px;box-shadow:0 1px 6px rgba(0,0,0,0.07);">
+
+              <!-- Amber rule -->
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:28px;">
+                <tr>
+                  <td style="background:#F59E0B;height:3px;border-radius:2px;"></td>
+                </tr>
+              </table>
+
+              <!-- Heading -->
+              <p style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181f;letter-spacing:-0.3px;">
+                Reset your password
+              </p>
+
+              <!-- Body -->
+              <p style="margin:0 0 28px;font-size:15px;line-height:1.6;color:#4a4a5a;">
+                We received a request to reset the password for the FastGlass account associated with <strong style="color:#18181f;">{{ .Email }}</strong>. Click the button below to choose a new password.
+              </p>
+
+              <!-- CTA button -->
+              <table cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:28px;">
+                <tr>
+                  <td style="background:#F59E0B;border-radius:8px;">
+                    <a href="{{ .ConfirmationURL }}"
+                       style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:700;color:#18181f;text-decoration:none;letter-spacing:0.1px;">
+                      Set new password →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Fallback link -->
+              <p style="margin:0 0 24px;font-size:13px;color:#8a8a9a;line-height:1.6;">
+                If the button doesn't work, copy and paste this link into your browser:<br />
+                <a href="{{ .ConfirmationURL }}" style="color:#D97706;word-break:break-all;">{{ .ConfirmationURL }}</a>
+              </p>
+
+              <!-- Divider -->
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:20px;">
+                <tr><td style="border-top:1px solid #e8e8ee;"></td></tr>
+              </table>
+
+              <!-- Security note -->
+              <p style="margin:0;font-size:12px;color:#8a8a9a;line-height:1.6;">
+                This link expires in <strong>1 hour</strong>. If you didn't request a password reset, you can safely ignore this email — your password won't change.
+              </p>
+
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td align="center" style="padding-top:24px;">
+              <p style="margin:0;font-size:12px;color:#8a8a9a;">
+                FastGlass Onsite Pricing App &nbsp;·&nbsp;
+                <a href="https://fieldpricer.com" style="color:#8a8a9a;text-decoration:none;">fieldpricer.com</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>
