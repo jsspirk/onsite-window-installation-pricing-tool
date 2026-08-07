@@ -203,6 +203,7 @@ function calcJob(panes, supplier, opts = {}) {
   panes.forEach(p => {
     const r = calcPane(p, supplier);
     if (!r || r.requiresQuote) return;
+    if (p.excluded) return;
     totalProduct += r.productCost;
     totalLabor   += r.laborCost;
     totalRounded += r.roundedTotal;
@@ -1108,6 +1109,28 @@ test('rounded and unrounded grandTotal can legitimately differ for the same pane
     const roundedJob = calcJob(panes, 'busick', { rounded: true });
     assert.notStrictEqual(rawJob.grandTotal, roundedJob.grandTotal);
   }
+});
+
+// ─── Q. Include/Exclude toggle ────────────────────────────────────────────────
+
+test('calcJob drops an excluded pane\'s cost from every total', () => {
+  const included = pane({ width: 24, height: 36 });
+  const excluded = pane({ width: 30, height: 40, excluded: true });
+  const jobBoth    = calcJob([included, excluded], 'busick');
+  const jobOneOnly = calcJob([included], 'busick');
+  assert.strictEqual(jobBoth.grandTotal, jobOneOnly.grandTotal);
+  assert.strictEqual(jobBoth.totalProduct, jobOneOnly.totalProduct);
+  assert.strictEqual(jobBoth.totalLabor, jobOneOnly.totalLabor);
+});
+test('excluding all panes zeroes the total, not an error', () => {
+  const panes = [pane({ excluded: true }), pane({ width: 30, height: 40, excluded: true })];
+  const job = calcJob(panes, 'busick');
+  assert.strictEqual(job.grandTotal, 0);
+});
+test('an excluded pane with no valid rate (requiresQuote) still doesn\'t crash calcJob', () => {
+  const panes = [pane({ excluded: true, coating: 'other', unitType: 'single_pane' })];
+  const job = calcJob(panes, 'busick');
+  assert.strictEqual(job.grandTotal, 0);
 });
 
 // ─── Summary ─────────────────────────────────────────────────────────────────

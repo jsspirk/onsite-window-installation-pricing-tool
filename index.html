@@ -1506,12 +1506,16 @@ function roundToIncrement(n, inc) {
 // prices and the job range is built from that rounded sum.
 function calcJob(panes, supplier, opts = {}) {
   let totalProduct = 0, totalLabor = 0, totalRounded = 0;
+  // Excluded items still appear in lineItems (Quote Detail keeps showing their
+  // own price on the card) — they're just left out of every summed total.
   const lineItems = panes.map(p => {
     const r = calcPane(p, supplier);
     if (!r || r.requiresQuote) return null;
-    totalProduct += r.productCost;
-    totalLabor   += r.laborCost;
-    totalRounded += r.roundedTotal;
+    if (!p.excluded) {
+      totalProduct += r.productCost;
+      totalLabor   += r.laborCost;
+      totalRounded += r.roundedTotal;
+    }
     return { ...p, ...r };
   }).filter(Boolean);
   const grandTotal = opts.rounded ? totalRounded : (totalProduct + totalLabor);
@@ -1580,6 +1584,7 @@ function normalizeQuote(row) {
       laborHrs:    parseFloat(p.labor_hrs),
       storyLevel:  p.story_level || 'ground',
       unitType:    p.unit_type  || 'double_pane',
+      excluded:    !!p.excluded,
     }));
   return {
     id:              row.id,
@@ -1698,6 +1703,7 @@ async function doSyncQuote(quote, panes, signatureDataUrl) {
     labor_hrs:    p.laborHrs    ?? 1.0,
     story_level:  p.storyLevel  || 'ground',
     unit_type:    p.unitType    || 'double_pane',
+    excluded:     p.excluded    || false,
   }));
   const { error } = await sb.from('quotes').upsert(quoteRow);
   if (error) throw error;
@@ -1981,6 +1987,7 @@ function freshPane(from) {
     laborHrs:    1.0,
     storyLevel:  'ground',  // 'ground' | 'upper'
     unitType:    'double_pane',  // 'single_pane' | 'double_pane' | 'triple_pane'
+    excluded:    false,  // Quote Detail Include/Exclude toggle — stays in the record, dropped from totals/customer view
   };
 }
 
@@ -3389,11 +3396,13 @@ function renderQuoteDetail() {
       const r = calcPane(p, d.supplier);
       const label = getPaneLabel(p);
       const qty = p.qty || 1;
+      const excluded = !!p.excluded;
       return `
-      <div class="card card-tight mb-8">
+      <div class="card card-tight mb-8" style="${excluded ? 'opacity:0.7;' : ''}">
         <div class="flex-between mb-6">
           <div>
             <span style="font-family:var(--font-semi);font-weight:700;font-size:15px;">Item ${i + 1}${p.location ? ' · ' + p.location : ''}</span>
+            ${excluded ? '<span style="margin-left:8px;font-size:10px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:var(--text-3);background:var(--bg-2);border:1px solid var(--border-0);border-radius:100px;padding:2px 8px;">Excluded</span>' : ''}
             <div style="font-size:12px;color:var(--text-2);margin-top:2px;">${label}${qty > 1 ? ' · Qty ' + qty : ''}</div>
           </div>
           <div style="display:flex;gap:6px;">
@@ -3403,14 +3412,18 @@ function renderQuoteDetail() {
               style="font-size:12px;padding:6px 10px;color:var(--red);border-color:var(--red);${d.panes.length <= 1 || isLocked ? 'opacity:0.3;' : ''}" title="${isLocked ? 'Approved quotes are locked' : d.panes.length <= 1 ? 'A quote needs at least one item' : 'Remove item'}">✕</button>
           </div>
         </div>
+        <button class="chip ${excluded ? '' : 'active'}" data-toggle-exclude="${i}" ${isLocked ? 'disabled' : ''}
+          style="margin-bottom:8px;font-size:12px;min-height:32px;padding:0 12px;${isLocked ? 'opacity:0.3;pointer-events:none;' : ''}">
+          ${excluded ? '✕ Excluded — not counted in total or shown to customer' : '✓ Included in total'}
+        </button>
         <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">
           ${fmtMeasured(p.widthWhole || p.width, p.widthFrac || '')}" × ${fmtMeasured(p.heightWhole || p.height, p.heightFrac || '')}"
           ${r && !r.requiresQuote ? ' · ' + r.sqft.toFixed(2) + ' sqft' : ''}
         </div>
         <div class="divider-dashed"></div>
-        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Glass / Product</span><span class="price-row-value" style="font-size:14px;">${r && !r.requiresQuote ? fmt(r.productCost) : 'QUOTE'}</span></div>
-        <div class="price-row"><span class="price-row-label" style="font-size:13px;">Labor (${(p.laborHrs ?? 1.0).toFixed(2)} hr${r && !r.requiresQuote && r.crewSize > 1 ? ' · 2-tech crew' : ''})</span><span class="price-row-value" style="font-size:14px;">${r && !r.requiresQuote ? fmt(r.laborCost) : '—'}</span></div>
-        <div class="price-row" style="margin-top:4px;">
+        <div class="price-row" style="${excluded ? 'opacity:0.5;' : ''}"><span class="price-row-label" style="font-size:13px;">Glass / Product</span><span class="price-row-value" style="font-size:14px;">${r && !r.requiresQuote ? fmt(r.productCost) : 'QUOTE'}</span></div>
+        <div class="price-row" style="${excluded ? 'opacity:0.5;' : ''}"><span class="price-row-label" style="font-size:13px;">Labor (${(p.laborHrs ?? 1.0).toFixed(2)} hr${r && !r.requiresQuote && r.crewSize > 1 ? ' · 2-tech crew' : ''})</span><span class="price-row-value" style="font-size:14px;">${r && !r.requiresQuote ? fmt(r.laborCost) : '—'}</span></div>
+        <div class="price-row" style="margin-top:4px;${excluded ? 'opacity:0.5;' : ''}">
           <span class="price-row-label" style="font-size:13px;font-weight:600;color:var(--text-1);">Item Estimate</span>
           <span class="price-row-value" style="font-size:15px;color:var(--amber);font-weight:700;">${r && !r.requiresQuote ? (isRounded ? fmt(r.roundedTotal) : fmtRange(r.lineTotal)) : '—'}</span>
         </div>
@@ -3728,7 +3741,7 @@ function renderCustomerView(quoteId) {
   }
 
   const supplier  = q.supplier || getDefaultSupplier();
-  const lineItems = q.panes.map((p, i) => {
+  const lineItems = q.panes.filter(p => !p.excluded).map((p, i) => {
     const r = calcPane(p, supplier);
     return { ...p, ...(r && !r.requiresQuote ? r : {}), idx: i };
   });
@@ -4489,6 +4502,24 @@ function attachEvents() {
     if (d.panes.length <= 1) return; // a quote needs at least one pane
     if (!confirm('Remove this item from the quote?')) return;
     d.panes.splice(idx, 1);
+    const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' });
+    d.totalProduct   = jobCalc.totalProduct;
+    d.totalLabor     = jobCalc.totalLabor;
+    d.totalMaterials = jobCalc.totalMaterials;
+    d.grandTotal     = jobCalc.grandTotal;
+    appData.quotes = appData.quotes.map(q => q.id === d.id ? { ...d } : q);
+    saveState(appData);
+    syncQuoteToSupabase(d, d.panes);
+    render();
+  });
+
+  // Include/Exclude toggle — item stays in the record and on Quote Detail,
+  // just dropped from every total and hidden from the customer view.
+  delegate('[data-toggle-exclude]', 'click', e => {
+    const idx = parseInt(e.currentTarget.dataset.toggleExclude);
+    const d = app.draft;
+    if (d.status === 'approved') return; // locked, same as edit/remove
+    d.panes[idx].excluded = !d.panes[idx].excluded;
     const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' });
     d.totalProduct   = jobCalc.totalProduct;
     d.totalLabor     = jobCalc.totalLabor;
