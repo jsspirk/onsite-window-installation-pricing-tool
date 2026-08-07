@@ -2079,14 +2079,14 @@ function progressBar(d) {
   return `
   <div class="progress-strip">
     <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-      <span class="progress-strip-count">${count} pane${count !== 1 ? 's' : ''}</span>
+      <span class="progress-strip-count">${count} item${count !== 1 ? 's' : ''}</span>
       ${customer}
     </div>
     <div>
       ${jobCalc
         ? `<div class="progress-strip-total">${fmtRange(jobCalc.grandTotal)}</div>
            <div style="font-size:10px;color:var(--text-3);text-align:right;">est. before tax</div>`
-        : `<div style="font-size:13px;color:var(--text-3);">add a pane to see total</div>`}
+        : `<div style="font-size:13px;color:var(--text-3);">add an item to see total</div>`}
     </div>
   </div>`;
 }
@@ -2313,7 +2313,7 @@ function renderNewQuote() {
 }
 
 function stepIndicator(active) {
-  const steps = ['Pane Details', 'Pane List', 'Review & Send'];
+  const steps = ['Item Details', 'Item List', 'Review & Send'];
   return `
   <div class="step-indicator">
     ${steps.map((s, i) => `
@@ -2391,7 +2391,7 @@ function renderNewQuoteStep1() {
 <div class="screen" style="background:var(--bg-0);">
   <div class="app-header">
     <button class="header-back-btn" id="${d.isAdminEdit ? 'back-to-quote-detail' : 'back-home'}">←</button>
-    <div class="header-title">${d.isAdminEdit ? (isEditing ? 'Edit Pane' : 'New Pane') : 'New Quote'}</div>
+    <div class="header-title">${d.isAdminEdit ? (isEditing ? 'Edit Item' : 'New Item') : 'New Quote'}</div>
     <div class="header-right">${headerNavIcons()}</div>
   </div>
   ${d.isAdminEdit ? '' : stepIndicator(0)}
@@ -2430,7 +2430,7 @@ function renderNewQuoteStep1() {
     <!-- THIS WINDOW CARD -->
     <div class="card" style="border-color:${isEditing?'var(--blue)':'var(--border-0)'};">
       <div class="section-label mb-12" style="${isEditing?'color:var(--blue);':''}">
-        ${isEditing?'Editing Pane '+(d.editingPaneIdx+1):'This Window'}
+        ${isEditing?'Editing Item '+(d.editingPaneIdx+1):'This Window'}
       </div>
 
       <div class="form-row mb-10">
@@ -2468,7 +2468,7 @@ function renderNewQuoteStep1() {
       </div>
       <div class="dim-resolved" style="margin-bottom:16px;">${cp.heightWhole ? `→ <strong>${cp.height}"</strong>${cp.heightFrac ? ` <span style="color:var(--text-3);">(measured ${fmtMeasured(cp.heightWhole, cp.heightFrac)}")</span>` : ''}` : ''}</div>
 
-      ${largePaneWarn?`<div class="alert alert-warning mb-12"><span class="alert-icon">⚠</span>Pane exceeds standard catalog size. Flag for office review.</div>`:''}
+      ${largePaneWarn?`<div class="alert alert-warning mb-12"><span class="alert-icon">⚠</span>Item exceeds standard catalog size. Flag for office review.</div>`:''}
 
       <div class="section-label mb-8">Unit Type</div>
       <div class="chip-group mb-12">
@@ -2580,7 +2580,7 @@ function renderNewQuoteStep1() {
     `:paneCalc?`
     <div class="card mt-12" style="border-color:var(--border-0);">
       <div class="section-label mb-8">
-        ${isEditing?'Pane '+(d.editingPaneIdx+1)+' — Updated Preview':'This Pane — Preview'}
+        ${isEditing?'Item '+(d.editingPaneIdx+1)+' — Updated Preview':'This Item — Preview'}
         ${cp.qty>1?` <span style="color:var(--amber);">(×${cp.qty})</span>`:''}
       </div>
       <div class="price-row">
@@ -2592,7 +2592,7 @@ function renderNewQuoteStep1() {
         <span class="price-row-value">${fmt(paneCalc.laborCost)}</span>
       </div>
       <div class="price-total-row">
-        <span class="price-total-label">Pane Range</span>
+        <span class="price-total-label">Item Range</span>
         <span class="price-total-value" style="font-size:17px;">${fmtRange(paneCalc.lineTotal)}</span>
       </div>
     </div>`:''}
@@ -2604,7 +2604,7 @@ function renderNewQuoteStep1() {
   ${d.isAdminEdit ? `
   <div class="action-bar">
     <button class="btn btn-primary btn-full" id="add-pane-btn" ${!canSave ? 'disabled' : ''}>
-      ${isEditing ? '✓ Update Pane' : '+ Add Pane'}
+      ${isEditing ? '✓ Update Item' : '+ Add Item'}
     </button>
     ${!canSave ? `<p style="text-align:center;font-size:13px;color:var(--text-3);margin-top:8px;">Select thickness, coating, finish and enter dimensions</p>` : ''}
   </div>
@@ -2612,7 +2612,7 @@ function renderNewQuoteStep1() {
   <div class="action-bar" style="flex-direction:column;gap:8px;">
     <div style="display:flex;gap:8px;">
       <button class="btn btn-secondary" id="add-pane-btn" ${!canSave?'disabled':''} style="flex:1;">
-        ${isEditing?'✓ Update Pane':'+ Add Pane'+(d.panes.length>0&&!isEditing?' ('+d.panes.length+')':'')}
+        ${isEditing?'✓ Update Item':'+ Add Item'+(d.panes.length>0&&!isEditing?' ('+d.panes.length+')':'')}
       </button>
       <button class="btn btn-primary" id="review-quote-btn" ${!canReview?'disabled':''} style="flex:2;">
         Review Quote →
@@ -2633,14 +2633,14 @@ function renderNewQuoteStep2() {
 <div class="screen" style="background:var(--bg-0);">
   <div class="app-header">
     <button class="header-back-btn" id="back-step1">←</button>
-    <div class="header-title">Pane List</div>
+    <div class="header-title">Item List</div>
     <div class="header-right">${headerNavIcons()}</div>
   </div>
   ${stepIndicator(1)}
 
   <div class="scroll-content" style="padding-bottom:140px;">
     <div class="flex-between mb-16">
-      <span class="section-label">${d.panes.length} Pane${d.panes.length !== 1 ? 's' : ''}</span>
+      <span class="section-label">${d.panes.length} Item${d.panes.length !== 1 ? 's' : ''}</span>
       <span style="font-size:13px;color:var(--text-2);"><strong style="color:var(--text-1);">${getSupplierName(d.supplier)}</strong></span>
     </div>
 
@@ -2659,18 +2659,18 @@ function renderNewQuoteStep2() {
           </div>
         </div>
         <div class="pane-item-price">${r&&!r.requiresQuote?fmtRange(r.lineTotal):'—'}</div>
-        <button class="pane-item-edit" data-edit-pane-step2="${i}" title="Edit pane">✎</button>
+        <button class="pane-item-edit" data-edit-pane-step2="${i}" title="Edit item">✎</button>
         <button class="pane-item-remove" data-remove-pane="${p.id}">✕</button>
       </div>`;
     }).join('')}
 
     <button class="btn btn-ghost btn-full mt-8" id="add-another-pane-btn">
-      + Add Another Pane
+      + Add Another Item
     </button>
 
     ${d.panes.length < 20
-      ? `<p style="text-align:center; font-size:12px; color:var(--text-3); margin-top:6px;">${20 - d.panes.length} more pane${20 - d.panes.length !== 1 ? 's' : ''} can be added</p>`
-      : `<div class="alert alert-warning mt-8"><span class="alert-icon">⚠</span>Maximum of 20 panes per quote reached.</div>`
+      ? `<p style="text-align:center; font-size:12px; color:var(--text-3); margin-top:6px;">${20 - d.panes.length} more item${20 - d.panes.length !== 1 ? 's' : ''} can be added</p>`
+      : `<div class="alert alert-warning mt-8"><span class="alert-icon">⚠</span>Maximum of 20 items per quote reached.</div>`
     }
   </div>
 
@@ -2734,7 +2734,7 @@ function renderReview() {
     </div>
 
     <!-- Line Items -->
-    <div class="section-label mb-8">${d.panes.length} Pane${d.panes.length!==1?'s':''} — Line Items</div>
+    <div class="section-label mb-8">${d.panes.length} Item${d.panes.length!==1?'s':''}</div>
     ${d.panes.map((p,i)=>{
       const r = calcPane(p, d.supplier);
       const label = getPaneLabel(p);
@@ -2744,7 +2744,7 @@ function renderReview() {
       <div class="card card-tight mb-8">
         <div class="flex-between mb-4">
           <div>
-            <span style="font-family:var(--font-semi);font-weight:700;font-size:15px;">Pane ${i+1}${p.location?' · '+p.location:''}</span>
+            <span style="font-family:var(--font-semi);font-weight:700;font-size:15px;">Item ${i+1}${p.location?' · '+p.location:''}</span>
             <div style="font-size:12px;color:var(--text-2);margin-top:2px;">${label}${qty>1?' · Qty '+qty:''}</div>
           </div>
           <span style="font-family:var(--font-title);font-weight:800;font-size:16px;color:var(--text-0);">${r&&!r.requiresQuote?fmtRange(r.lineTotal):'—'}</span>
@@ -2896,7 +2896,7 @@ function renderSent() {
     <div class="success-detail">
       <div class="section-label mb-8">Quote Summary</div>
       ${q.customerName ? `<div style="font-family:var(--font-semi);font-weight:700;font-size:18px;color:var(--text-0);margin-bottom:4px;">${q.customerName}</div>` : ''}
-      <div style="font-size:14px;color:var(--text-2);margin-bottom:12px;">${fmtDate(q.jobDate)} · ${q.panes.length} pane${q.panes.length !== 1 ? 's' : ''}</div>
+      <div style="font-size:14px;color:var(--text-2);margin-bottom:12px;">${fmtDate(q.jobDate)} · ${q.panes.length} item${q.panes.length !== 1 ? 's' : ''}</div>
       <div class="price-row">
         <span class="price-row-label">Glass / Product</span>
         <span class="price-row-value">${fmt(q.totalProduct)}</span>
@@ -2974,7 +2974,7 @@ function renderHistoryItem(q, showTech = false) {
   <div class="history-icon">${iconMap[q.status] || '📋'}</div>
   <div class="history-info">
     <div class="history-customer">${q.customerName || 'No customer name'}</div>
-    <div class="history-meta">${fmtDate(q.jobDate)} · ${q.panes.length} pane${q.panes.length !== 1 ? 's' : ''}${showTech && q.techName ? ' · ' + q.techName : ''}</div>
+    <div class="history-meta">${fmtDate(q.jobDate)} · ${q.panes.length} item${q.panes.length !== 1 ? 's' : ''}${showTech && q.techName ? ' · ' + q.techName : ''}</div>
     <span class="badge ${statusMap[q.status] || 'badge-draft'}" style="margin-top:4px;">${q.status}</span>
   </div>
   <div>
@@ -3384,7 +3384,7 @@ function renderQuoteDetail() {
     ` : ''}
 
     <!-- Panes -->
-    <div class="section-label mb-8">${d.panes.length} Pane${d.panes.length !== 1 ? 's' : ''}</div>
+    <div class="section-label mb-8">${d.panes.length} Item${d.panes.length !== 1 ? 's' : ''}</div>
     ${d.panes.map((p, i) => {
       const r = calcPane(p, d.supplier);
       const label = getPaneLabel(p);
@@ -3393,14 +3393,14 @@ function renderQuoteDetail() {
       <div class="card card-tight mb-8">
         <div class="flex-between mb-6">
           <div>
-            <span style="font-family:var(--font-semi);font-weight:700;font-size:15px;">Pane ${i + 1}${p.location ? ' · ' + p.location : ''}</span>
+            <span style="font-family:var(--font-semi);font-weight:700;font-size:15px;">Item ${i + 1}${p.location ? ' · ' + p.location : ''}</span>
             <div style="font-size:12px;color:var(--text-2);margin-top:2px;">${label}${qty > 1 ? ' · Qty ' + qty : ''}</div>
           </div>
           <div style="display:flex;gap:6px;">
             <button class="btn btn-secondary btn-sm" data-admin-edit-pane="${i}" ${isLocked ? 'disabled' : ''}
-              style="font-size:12px;padding:6px 14px;${isLocked ? 'opacity:0.3;' : ''}">Edit Pane</button>
+              style="font-size:12px;padding:6px 14px;${isLocked ? 'opacity:0.3;' : ''}">Edit Item</button>
             <button class="btn btn-ghost btn-sm" data-admin-remove-pane="${i}" ${d.panes.length <= 1 || isLocked ? 'disabled' : ''}
-              style="font-size:12px;padding:6px 10px;color:var(--red);border-color:var(--red);${d.panes.length <= 1 || isLocked ? 'opacity:0.3;' : ''}" title="${isLocked ? 'Approved quotes are locked' : d.panes.length <= 1 ? 'A quote needs at least one pane' : 'Remove pane'}">✕</button>
+              style="font-size:12px;padding:6px 10px;color:var(--red);border-color:var(--red);${d.panes.length <= 1 || isLocked ? 'opacity:0.3;' : ''}" title="${isLocked ? 'Approved quotes are locked' : d.panes.length <= 1 ? 'A quote needs at least one item' : 'Remove item'}">✕</button>
           </div>
         </div>
         <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">
@@ -3411,13 +3411,13 @@ function renderQuoteDetail() {
         <div class="price-row"><span class="price-row-label" style="font-size:13px;">Glass / Product</span><span class="price-row-value" style="font-size:14px;">${r && !r.requiresQuote ? fmt(r.productCost) : 'QUOTE'}</span></div>
         <div class="price-row"><span class="price-row-label" style="font-size:13px;">Labor (${(p.laborHrs ?? 1.0).toFixed(2)} hr${r && !r.requiresQuote && r.crewSize > 1 ? ' · 2-tech crew' : ''})</span><span class="price-row-value" style="font-size:14px;">${r && !r.requiresQuote ? fmt(r.laborCost) : '—'}</span></div>
         <div class="price-row" style="margin-top:4px;">
-          <span class="price-row-label" style="font-size:13px;font-weight:600;color:var(--text-1);">Pane Estimate</span>
+          <span class="price-row-label" style="font-size:13px;font-weight:600;color:var(--text-1);">Item Estimate</span>
           <span class="price-row-value" style="font-size:15px;color:var(--amber);font-weight:700;">${r && !r.requiresQuote ? (isRounded ? fmt(r.roundedTotal) : fmtRange(r.lineTotal)) : '—'}</span>
         </div>
       </div>`;
     }).join('')}
 
-    <button class="btn btn-secondary btn-full mb-8" id="quote-detail-add-pane" ${isLocked ? 'disabled' : ''} style="${isLocked ? 'opacity:0.3;' : ''}">+ Add Pane</button>
+    <button class="btn btn-secondary btn-full mb-8" id="quote-detail-add-pane" ${isLocked ? 'disabled' : ''} style="${isLocked ? 'opacity:0.3;' : ''}">+ Add Item</button>
 
     <!-- Totals -->
     <div class="card mt-8" style="border-color:var(--amber);background:var(--amber-bg);">
@@ -3755,8 +3755,8 @@ function renderCustomerView(quoteId) {
 
   ${lineItems.map((item, i) => `
   <div style="margin-bottom:10px;">
-    <div class="cv-label">Pane ${i+1}${item.location?' — '+item.location:''}</div>
-    <div style="font-size:14px;color:var(--text-1);">${getPaneLabel(item)}${(item.qty||1)>1?' (×'+item.qty+')':''} · ${item.width}" × ${item.height}"${item.sqft?' ('+item.sqft.toFixed(2)+' sqft)':''}</div>
+    <div class="cv-label">Item ${i+1}${item.location?' — '+item.location:''}</div>
+    <div style="font-size:14px;color:var(--text-1);">${getPaneLabel(item)}${(item.qty||1)>1?' (×'+item.qty+')':''} · ${item.width}" × ${item.height}"</div>
   </div>
   `).join('')}
 
@@ -4327,7 +4327,7 @@ function attachEvents() {
   // Returns true (proceed with switch) or false (stay on current pane).
   const confirmPaneSwitch = () => {
     if (!hasUnsavedPaneChanges()) return true;
-    const save = confirm('You have unsaved changes to this pane.\n\nTap OK to save and switch, or Cancel to stay.');
+    const save = confirm('You have unsaved changes to this item.\n\nTap OK to save and switch, or Cancel to stay.');
     if (save) {
       const d = app.draft;
       d.panes[d.editingPaneIdx] = { id: d.panes[d.editingPaneIdx].id, ...d.currentPane };
@@ -4487,7 +4487,7 @@ function attachEvents() {
     const idx = parseInt(e.currentTarget.dataset.adminRemovePane);
     const d = app.draft;
     if (d.panes.length <= 1) return; // a quote needs at least one pane
-    if (!confirm('Remove this pane from the quote?')) return;
+    if (!confirm('Remove this item from the quote?')) return;
     d.panes.splice(idx, 1);
     const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' });
     d.totalProduct   = jobCalc.totalProduct;
@@ -5056,7 +5056,7 @@ function completeSendAction(status, signatureDataUrl) {
 function revertApprovedQuote() {
   const d = app.draft;
   if (!d || d.status !== 'approved') return;
-  if (!confirm('Revert this quote to Sent? This unlocks pane editing. The customer\'s existing signature and approval stay on file.')) return;
+  if (!confirm('Revert this quote to Sent? This unlocks item editing. The customer\'s existing signature and approval stay on file.')) return;
   updateQuoteStatus('sent', { keepDraft: true });
   render();
 }
