@@ -198,7 +198,11 @@ function calcPane(pane, supplier) {
   return { sqft: +(SF * qty).toFixed(4), productCost, laborCost: laborTotal, materialsCost: 0, lineTotal, roundedTotal, requiresQuote: false, gridMode, weight: calcPaneWeight(pane), crewSize };
 }
 
-function calcJob(panes, supplier, opts = {}) {
+function sumManualCosts(manualCosts) {
+  return (manualCosts || []).filter(m => !m.excluded).reduce((s, m) => s + (m.cost || 0), 0);
+}
+
+function calcJob(panes, supplier, opts = {}, manualCosts = []) {
   let totalProduct = 0, totalLabor = 0, totalRounded = 0;
   panes.forEach(p => {
     const r = calcPane(p, supplier);
@@ -208,11 +212,12 @@ function calcJob(panes, supplier, opts = {}) {
     totalLabor   += r.laborCost;
     totalRounded += r.roundedTotal;
   });
-  const grandTotal = opts.rounded ? totalRounded : (totalProduct + totalLabor);
+  const totalMaterials = sumManualCosts(manualCosts);
+  const grandTotal = (opts.rounded ? totalRounded : (totalProduct + totalLabor)) + totalMaterials;
   return {
     totalProduct:   +totalProduct.toFixed(2),
     totalLabor:     +totalLabor.toFixed(2),
-    totalMaterials: 0,
+    totalMaterials: +totalMaterials.toFixed(2),
     grandTotal:     +grandTotal.toFixed(2),
   };
 }
@@ -1240,6 +1245,48 @@ test('distributePrice omits excluded panes entirely', () => {
   assert.strictEqual(ranges.items.length, 1);
   const dist = distributePrice(ranges.totalLow, ranges);
   assert.strictEqual(dist.length, 1);
+});
+
+// ─── S. Manual costs (Phase 4) ─────────────────────────────────────────────────
+
+function manualCost(overrides = {}) {
+  return { id: 'm1', name: 'Disposal Fee', description: '', cost: 75, excluded: false, ...overrides };
+}
+
+test('calcJob folds included manual costs into totalMaterials and grandTotal', () => {
+  const panes = [pane({ width: 24, height: 36 })];
+  const withoutManual = calcJob(panes, 'busick', { rounded: true });
+  const withManual = calcJob(panes, 'busick', { rounded: true }, [manualCost({ cost: 75 })]);
+  assert.strictEqual(withManual.totalMaterials, 75);
+  assert.strictEqual(withManual.grandTotal, +(withoutManual.grandTotal + 75).toFixed(2));
+});
+test('calcJob ignores an excluded manual cost', () => {
+  const panes = [pane({ width: 24, height: 36 })];
+  const withoutManual = calcJob(panes, 'busick', { rounded: true });
+  const withExcludedManual = calcJob(panes, 'busick', { rounded: true }, [manualCost({ cost: 75, excluded: true })]);
+  assert.strictEqual(withExcludedManual.totalMaterials, 0);
+  assert.strictEqual(withExcludedManual.grandTotal, withoutManual.grandTotal);
+});
+test('sumManualCosts sums only included costs', () => {
+  const costs = [manualCost({ id: 'm1', cost: 50 }), manualCost({ id: 'm2', cost: 30, excluded: true }), manualCost({ id: 'm3', cost: 20 })];
+  assert.strictEqual(sumManualCosts(costs), 70);
+});
+test('manual costs are flat: subtracting their sum before distributePrice keeps pane items + manual sum = finalPrice exactly', () => {
+  // Mirrors renderCustomerView's actual call pattern: distributePrice gets
+  // (finalPrice - manualSum) against the pane-only ranges, then manual costs
+  // are added back on top as fixed line items — must land on finalPrice
+  // exactly, at both range edges and an arbitrary point in between.
+  const panes = [pane({ width: 17, height: 23 }), pane({ width: 41, height: 29 })];
+  const manualCosts = [manualCost({ id: 'm1', cost: 63.50 }), manualCost({ id: 'm2', cost: 11.25 })];
+  const manualSum = sumManualCosts(manualCosts);
+  const ranges = calcItemRanges(panes, 'busick');
+  [ranges.totalLow + manualSum, ranges.totalHigh + manualSum, ranges.totalLow + manualSum + (ranges.totalHigh - ranges.totalLow) * 0.42]
+    .forEach(finalPrice => {
+      const dist = distributePrice(finalPrice - manualSum, ranges);
+      const paneSum = +dist.reduce((s, d) => s + d.price, 0).toFixed(2);
+      const grandTotal = +(paneSum + manualSum).toFixed(2);
+      assert.strictEqual(grandTotal, +finalPrice.toFixed(2), `expected ${finalPrice}, got ${grandTotal}`);
+    });
 });
 
 // ─── Summary ─────────────────────────────────────────────────────────────────

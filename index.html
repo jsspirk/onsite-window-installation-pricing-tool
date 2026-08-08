@@ -1386,6 +1386,8 @@ const app = {
   draftTiers: null,
   draftCatalog: null,     // working copy of price_catalog while editing Glass Types/Labor/Materials
   catalogSupplier: null,  // selected supplier chip on the Glass Types tab
+  manualCostModal: false,       // Add/Edit Manual Cost sheet open on Quote Detail
+  editingManualCostIdx: null,   // null = adding new, else index into d.manualCosts
 };
 
 // Shared config — loaded from Supabase app_config, localStorage cache as offline fallback
@@ -1504,7 +1506,7 @@ function roundToIncrement(n, inc) {
 // true sums each pane's roundedTotal instead — used once a quote is presented
 // to the customer or has been sent, so line items are shown as single rounded
 // prices and the job range is built from that rounded sum.
-function calcJob(panes, supplier, opts = {}) {
+function calcJob(panes, supplier, opts = {}, manualCosts = []) {
   let totalProduct = 0, totalLabor = 0, totalRounded = 0;
   // Excluded items still appear in lineItems (Quote Detail keeps showing their
   // own price on the card) — they're just left out of every summed total.
@@ -1518,14 +1520,22 @@ function calcJob(panes, supplier, opts = {}) {
     }
     return { ...p, ...r };
   }).filter(Boolean);
-  const grandTotal = opts.rounded ? totalRounded : (totalProduct + totalLabor);
+  // Manual costs are flat, typed-in amounts — no ±band range like calculated
+  // items, they just add straight into the total (reusing the previously
+  // always-0 totalMaterials bucket).
+  const totalMaterials = sumManualCosts(manualCosts);
+  const grandTotal = (opts.rounded ? totalRounded : (totalProduct + totalLabor)) + totalMaterials;
   return {
     lineItems,
     totalProduct:   +totalProduct.toFixed(2),
     totalLabor:     +totalLabor.toFixed(2),
-    totalMaterials: 0,
+    totalMaterials: +totalMaterials.toFixed(2),
     grandTotal:     +grandTotal.toFixed(2),
   };
+}
+
+function sumManualCosts(manualCosts) {
+  return (manualCosts || []).filter(m => !m.excluded).reduce((s, m) => s + (m.cost || 0), 0);
 }
 
 // Per-item ranges that the job's low/high is built FROM, rather than a range
@@ -1637,6 +1647,15 @@ function normalizeQuote(row) {
       unitType:    p.unit_type  || 'double_pane',
       excluded:    !!p.excluded,
     }));
+  const manualCosts = (row.manual_costs || [])
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map(m => ({
+      id:          m.id,
+      name:        m.name,
+      description: m.description || '',
+      cost:        parseFloat(m.cost) || 0,
+      excluded:    !!m.excluded,
+    }));
   return {
     id:              row.id,
     techId:          row.tech_id,
@@ -1662,6 +1681,7 @@ function normalizeQuote(row) {
     createdAt:       row.created_at,
     syncedAt:        row.synced_at,
     panes,
+    manualCosts,
   };
 }
 
@@ -1669,7 +1689,7 @@ async function loadQuotes() {
   try {
     const { data, error } = await sb
       .from('quotes')
-      .select('*, panes(*)')
+      .select('*, panes(*), manual_costs(*)')
       .order('created_at', { ascending: false });
     if (data && !error) {
       appData.quotes = data.map(normalizeQuote);
@@ -1756,6 +1776,15 @@ async function doSyncQuote(quote, panes, signatureDataUrl) {
     unit_type:    p.unitType    || 'double_pane',
     excluded:     p.excluded    || false,
   }));
+  const manualCostRows = (quote.manualCosts || []).map((m, i) => ({
+    id:          m.id,
+    quote_id:    quote.id,
+    sort_order:  i,
+    name:        m.name        || '',
+    description: m.description || '',
+    cost:        m.cost        || 0,
+    excluded:    m.excluded    || false,
+  }));
   const { error } = await sb.from('quotes').upsert(quoteRow);
   if (error) throw error;
   const { error: delError } = await sb.from('panes').delete().eq('quote_id', quote.id);
@@ -1763,6 +1792,12 @@ async function doSyncQuote(quote, panes, signatureDataUrl) {
   if (paneRows.length > 0) {
     const { error: insError } = await sb.from('panes').insert(paneRows);
     if (insError) throw insError;
+  }
+  const { error: delMcError } = await sb.from('manual_costs').delete().eq('quote_id', quote.id);
+  if (delMcError) throw delMcError;
+  if (manualCostRows.length > 0) {
+    const { error: insMcError } = await sb.from('manual_costs').insert(manualCostRows);
+    if (insMcError) throw insMcError;
   }
   return { signatureUrl };
 }
@@ -2064,7 +2099,7 @@ function newDraft() {
 
 function draftJobCalc() {
   if (!app.draft || app.draft.panes.length === 0) return null;
-  return calcJob(app.draft.panes, app.draft.supplier);
+  return calcJob(app.draft.panes, app.draft.supplier, {}, app.draft.manualCosts);
 }
 
 function draftCurrentPaneCalc() {
@@ -2132,7 +2167,7 @@ function render() {
 function progressBar(d) {
   if (!d) return '';
   const count    = d.panes.length;
-  const jobCalc  = count > 0 ? calcJob(d.panes, d.supplier) : null;
+  const jobCalc  = count > 0 ? calcJob(d.panes, d.supplier, {}, d.manualCosts) : null;
   const customer = d.customerName ? `<span style="font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px;">${d.customerName}</span>` : '';
   return `
   <div class="progress-strip">
@@ -2747,7 +2782,7 @@ function renderNewQuoteStep2() {
 function renderReview() {
   const d = app.draft;
   if (!d) return '';
-  const jobCalc = calcJob(d.panes, d.supplier);
+  const jobCalc = calcJob(d.panes, d.supplier, {}, d.manualCosts);
 
   return `
 <div class="screen" style="background:var(--bg-0);">
@@ -3404,8 +3439,12 @@ function renderQuoteDetail() {
   if (!d) return '';
   const isRounded = d.status !== 'draft';
   const isLocked  = d.status === 'approved';
-  const jobCalc = calcJob(d.panes, d.supplier, { rounded: isRounded });
-  const itemRanges = calcItemRanges(d.panes, d.supplier);
+  const jobCalc = calcJob(d.panes, d.supplier, { rounded: isRounded }, d.manualCosts);
+  const manualSum = sumManualCosts(d.manualCosts);
+  const itemRangesRaw = calcItemRanges(d.panes, d.supplier);
+  // Manual costs are flat — they shift the displayed range by a constant
+  // rather than getting their own ±band spread (see calcJob/sumManualCosts).
+  const itemRanges = { ...itemRangesRaw, totalLow: itemRangesRaw.totalLow + manualSum, totalHigh: itemRangesRaw.totalHigh + manualSum };
   const statusMap = { sent: 'badge-sent', draft: 'badge-draft', flagged: 'badge-flagged', shown: 'badge-shown', approved: 'badge-approved' };
 
   return `
@@ -3482,13 +3521,47 @@ function renderQuoteDetail() {
       </div>`;
     }).join('')}
 
-    <button class="btn btn-secondary btn-full mb-8" id="quote-detail-add-pane" ${isLocked ? 'disabled' : ''} style="${isLocked ? 'opacity:0.3;' : ''}">+ Add Item</button>
+    ${(d.manualCosts || []).map((m, i) => {
+      const excluded = !!m.excluded;
+      const itemNum = d.panes.length + i + 1;
+      return `
+      <div class="card card-tight mb-8" style="${excluded ? 'opacity:0.7;' : ''}">
+        <div class="flex-between mb-6">
+          <div>
+            <span style="font-family:var(--font-semi);font-weight:700;font-size:15px;">Item ${itemNum} · ${m.name}</span>
+            ${excluded ? '<span style="margin-left:8px;font-size:10px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:var(--text-3);background:var(--bg-2);border:1px solid var(--border-0);border-radius:100px;padding:2px 8px;">Excluded</span>' : ''}
+            ${m.description ? `<div style="font-size:12px;color:var(--text-2);margin-top:2px;">${m.description}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-secondary btn-sm" data-edit-manual-cost="${i}" ${isLocked ? 'disabled' : ''}
+              style="font-size:12px;padding:6px 14px;${isLocked ? 'opacity:0.3;' : ''}">Edit Item</button>
+            <button class="btn btn-ghost btn-sm" data-remove-manual-cost="${i}" ${isLocked ? 'disabled' : ''}
+              style="font-size:12px;padding:6px 10px;color:var(--red);border-color:var(--red);${isLocked ? 'opacity:0.3;' : ''}" title="${isLocked ? 'Approved quotes are locked' : 'Remove item'}">✕</button>
+          </div>
+        </div>
+        <button class="chip ${excluded ? '' : 'active'}" data-toggle-exclude-manual="${i}" ${isLocked ? 'disabled' : ''}
+          style="margin-bottom:8px;font-size:12px;min-height:32px;padding:0 12px;${isLocked ? 'opacity:0.3;pointer-events:none;' : ''}">
+          ${excluded ? '✕ Excluded — not counted in total or shown to customer' : '✓ Included in total'}
+        </button>
+        <div class="divider-dashed"></div>
+        <div class="price-row" style="margin-top:4px;${excluded ? 'opacity:0.5;' : ''}">
+          <span class="price-row-label" style="font-size:13px;font-weight:600;color:var(--text-1);">Manual Cost</span>
+          <span class="price-row-value" style="font-size:15px;color:var(--amber);font-weight:700;">${fmt(m.cost)}</span>
+        </div>
+      </div>`;
+    }).join('')}
+
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button class="btn btn-secondary" id="quote-detail-add-pane" ${isLocked ? 'disabled' : ''} style="flex:1;${isLocked ? 'opacity:0.3;' : ''}">+ Add Item</button>
+      <button class="btn btn-secondary" id="quote-detail-add-manual-cost" ${isLocked ? 'disabled' : ''} style="flex:1;${isLocked ? 'opacity:0.3;' : ''}">+ Add Manual Cost</button>
+    </div>
 
     <!-- Totals -->
     <div class="card mt-8" style="border-color:var(--amber);background:var(--amber-bg);">
       <div class="section-label mb-12">Job Total</div>
       <div class="price-row"><span class="price-row-label">Total Glass / Product</span><span class="price-row-value">${fmt(jobCalc.totalProduct)}</span></div>
       <div class="price-row"><span class="price-row-label">Total Labor</span><span class="price-row-value">${fmt(jobCalc.totalLabor)}</span></div>
+      ${jobCalc.totalMaterials > 0 ? `<div class="price-row"><span class="price-row-label">Total Manual Costs</span><span class="price-row-value">${fmt(jobCalc.totalMaterials)}</span></div>` : ''}
       <div class="price-total-row">
         <span class="price-total-label">Estimate Range</span>
         <span class="price-total-value" style="font-size:18px;">${fmt(itemRanges.totalLow)} – ${fmt(itemRanges.totalHigh)}</span>
@@ -3525,6 +3598,37 @@ function renderQuoteDetail() {
     `}
   </div>
   ${app.sendModal ? renderSendModal(jobCalc) : ''}
+  ${app.manualCostModal ? renderManualCostModal() : ''}
+</div>`;
+}
+
+function renderManualCostModal() {
+  const d = app.draft;
+  const isEditing = app.editingManualCostIdx !== null && app.editingManualCostIdx !== undefined;
+  const existing = isEditing ? d.manualCosts[app.editingManualCostIdx] : null;
+  return `
+<div class="modal-overlay" id="manual-cost-modal-overlay">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div style="font-family:var(--font-title);font-weight:800;font-size:22px;margin-bottom:16px;">${isEditing ? 'Edit Manual Cost' : 'Add Manual Cost'}</div>
+
+    <div class="form-group mb-12">
+      <label class="form-label">Item Name</label>
+      <input class="form-input" id="manual-cost-name" placeholder="e.g. Disposal Fee" value="${existing?.name || ''}" />
+    </div>
+    <div class="form-group mb-12">
+      <label class="form-label">Description</label>
+      <input class="form-input" id="manual-cost-description" placeholder="Optional" value="${existing?.description || ''}" />
+    </div>
+    <div class="form-group mb-16">
+      <label class="form-label">Cost</label>
+      <input class="form-input" id="manual-cost-amount" type="number" min="0" step="0.01" placeholder="0.00" value="${existing != null ? existing.cost : ''}" />
+    </div>
+    <p class="login-error" id="manual-cost-error"></p>
+
+    <button class="btn btn-primary btn-full mb-8" id="manual-cost-save-btn">${isEditing ? '✓ Save Changes' : '+ Add to Quote'}</button>
+    <button class="btn btn-secondary btn-full" id="manual-cost-cancel-btn">Cancel</button>
+  </div>
 </div>`;
 }
 
@@ -3542,6 +3646,7 @@ function openAdminQuote(quoteId) {
     toolsRequired:   q.toolsRequired || '',
     supplier:        q.supplier || getDefaultSupplier(),
     panes:           JSON.parse(JSON.stringify(q.panes)),
+    manualCosts:     JSON.parse(JSON.stringify(q.manualCosts || [])),
     currentPane:     freshPane(),
     editingPaneIdx:  null,
     step:            3,
@@ -3716,7 +3821,9 @@ function renderPresentPrice() {
   const d = app.draft;
   if (!d) return '';
   const inc = appConfig.round_increment || 25;
-  const { totalLow: low, totalHigh: high } = calcItemRanges(d.panes, d.supplier);
+  const manualSum = sumManualCosts(d.manualCosts);
+  const { totalLow: rawLow, totalHigh: rawHigh } = calcItemRanges(d.panes, d.supplier);
+  const low = rawLow + manualSum, high = rawHigh + manualSum;
   const incLow  = roundToIncrement(low, inc);
   const incHigh = roundToIncrement(high, inc);
   const mid     = roundToIncrement((low + high) / 2, inc);
@@ -3770,16 +3877,17 @@ function renderCustomerView(quoteId) {
   let q, jobCalc;
   if (quoteId === '__draft__' && app.draft) {
     const d = app.draft;
-    jobCalc = calcJob(d.panes, d.supplier, { rounded: true });
+    jobCalc = calcJob(d.panes, d.supplier, { rounded: true }, d.manualCosts);
     q = {
       customerName: d.customerName,
       customerContact: d.customerContact,
       jobDate: d.jobDate,
       panes: d.panes,
+      manualCosts: d.manualCosts,
       supplier: d.supplier,
       totalProduct: jobCalc.totalProduct,
       totalLabor: jobCalc.totalLabor,
-      totalMaterials: 0,
+      totalMaterials: jobCalc.totalMaterials,
       grandTotal: jobCalc.grandTotal,
       agreedPrice: d.agreedPrice,
       customerApproved: d.customerApproved,
@@ -3788,20 +3896,26 @@ function renderCustomerView(quoteId) {
   } else {
     q = appData.quotes.find(x => x.id === quoteId);
     if (!q) return '<div>Quote not found</div>';
-    jobCalc = { totalProduct: q.totalProduct, totalLabor: q.totalLabor, totalMaterials: 0, grandTotal: q.grandTotal };
+    jobCalc = { totalProduct: q.totalProduct, totalLabor: q.totalLabor, totalMaterials: q.totalMaterials, grandTotal: q.grandTotal };
   }
 
   const supplier   = q.supplier || getDefaultSupplier();
   const finalPrice = q.agreedPrice ?? q.grandTotal;
-  // Each item's price is finalPrice's exact position in the job's low/high
-  // range, applied to that item's own range — so item prices always sum to
-  // exactly what the customer is being quoted, whatever total was picked.
-  const distributed  = distributePrice(finalPrice, calcItemRanges(q.panes, supplier));
+  const manualSum  = sumManualCosts(q.manualCosts);
+  // Manual costs are flat — subtract them out before distributing so the
+  // pane items alone are made to sum to (finalPrice - manualSum); the
+  // manual cost line items below add the flat manualSum back on top,
+  // landing on exactly finalPrice with no double-counting.
+  // Each pane's price is that remainder's exact position in the job's
+  // low/high range, applied to that pane's own range — so line items
+  // always sum to exactly what the customer is being quoted.
+  const distributed  = distributePrice(finalPrice - manualSum, calcItemRanges(q.panes, supplier));
   const priceByPaneId = Object.fromEntries(distributed.map(x => [x.pane.id, x.price]));
   const lineItems = q.panes.filter(p => !p.excluded).map((p, i) => {
     const r = calcPane(p, supplier);
     return { ...p, ...(r && !r.requiresQuote ? r : {}), idx: i, itemPrice: priceByPaneId[p.id] };
   });
+  const manualLineItems = (q.manualCosts || []).filter(m => !m.excluded);
 
   const brand = getBrand();
   return `
@@ -3830,6 +3944,16 @@ function renderCustomerView(quoteId) {
       <div style="font-size:14px;color:var(--text-1);">${getPaneLabel(item)}${(item.qty||1)>1?' (×'+item.qty+')':''} · ${item.width}" × ${item.height}"</div>
     </div>
     <div style="font-size:15px;font-weight:700;color:#F59E0B;white-space:nowrap;">${item.itemPrice != null ? fmt(item.itemPrice) : ''}</div>
+  </div>
+  `).join('')}
+
+  ${manualLineItems.map((m, i) => `
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px;">
+    <div>
+      <div class="cv-label">Item ${lineItems.length + i + 1} — ${m.name}</div>
+      ${m.description ? `<div style="font-size:14px;color:var(--text-1);">${m.description}</div>` : ''}
+    </div>
+    <div style="font-size:15px;font-weight:700;color:#F59E0B;white-space:nowrap;">${fmt(m.cost)}</div>
   </div>
   `).join('')}
 
@@ -4447,7 +4571,7 @@ function attachEvents() {
     if (d.isAdminEdit) {
       // Recalculate totals and sync, then return to quote detail — covers
       // both adding a genuinely new pane and editing an existing one.
-      const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' });
+      const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' }, d.manualCosts);
       d.totalProduct   = jobCalc.totalProduct;
       d.totalLabor     = jobCalc.totalLabor;
       d.totalMaterials = jobCalc.totalMaterials;
@@ -4562,7 +4686,7 @@ function attachEvents() {
     if (d.panes.length <= 1) return; // a quote needs at least one pane
     if (!confirm('Remove this item from the quote?')) return;
     d.panes.splice(idx, 1);
-    const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' });
+    const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' }, d.manualCosts);
     d.totalProduct   = jobCalc.totalProduct;
     d.totalLabor     = jobCalc.totalLabor;
     d.totalMaterials = jobCalc.totalMaterials;
@@ -4580,7 +4704,88 @@ function attachEvents() {
     const d = app.draft;
     if (d.status === 'approved') return; // locked, same as edit/remove
     d.panes[idx].excluded = !d.panes[idx].excluded;
-    const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' });
+    const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' }, d.manualCosts);
+    d.totalProduct   = jobCalc.totalProduct;
+    d.totalLabor     = jobCalc.totalLabor;
+    d.totalMaterials = jobCalc.totalMaterials;
+    d.grandTotal     = jobCalc.grandTotal;
+    appData.quotes = appData.quotes.map(q => q.id === d.id ? { ...d } : q);
+    saveState(appData);
+    syncQuoteToSupabase(d, d.panes);
+    render();
+  });
+
+  // ---- MANUAL COSTS (Quote Detail) ----
+  on('quote-detail-add-manual-cost', 'click', () => {
+    app.editingManualCostIdx = null;
+    app.manualCostModal = true;
+    render();
+  });
+  delegate('[data-edit-manual-cost]', 'click', e => {
+    app.editingManualCostIdx = parseInt(e.currentTarget.dataset.editManualCost);
+    app.manualCostModal = true;
+    render();
+  });
+  delegate('[data-remove-manual-cost]', 'click', e => {
+    const idx = parseInt(e.currentTarget.dataset.removeManualCost);
+    const d = app.draft;
+    if (d.status === 'approved') return;
+    if (!confirm('Remove this item from the quote?')) return;
+    d.manualCosts.splice(idx, 1);
+    const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' }, d.manualCosts);
+    d.totalProduct   = jobCalc.totalProduct;
+    d.totalLabor     = jobCalc.totalLabor;
+    d.totalMaterials = jobCalc.totalMaterials;
+    d.grandTotal     = jobCalc.grandTotal;
+    appData.quotes = appData.quotes.map(q => q.id === d.id ? { ...d } : q);
+    saveState(appData);
+    syncQuoteToSupabase(d, d.panes);
+    render();
+  });
+  delegate('[data-toggle-exclude-manual]', 'click', e => {
+    const idx = parseInt(e.currentTarget.dataset.toggleExcludeManual);
+    const d = app.draft;
+    if (d.status === 'approved') return;
+    d.manualCosts[idx].excluded = !d.manualCosts[idx].excluded;
+    const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' }, d.manualCosts);
+    d.totalProduct   = jobCalc.totalProduct;
+    d.totalLabor     = jobCalc.totalLabor;
+    d.totalMaterials = jobCalc.totalMaterials;
+    d.grandTotal     = jobCalc.grandTotal;
+    appData.quotes = appData.quotes.map(q => q.id === d.id ? { ...d } : q);
+    saveState(appData);
+    syncQuoteToSupabase(d, d.panes);
+    render();
+  });
+  on('manual-cost-modal-overlay', 'click', e => {
+    if (e.target.id === 'manual-cost-modal-overlay') { app.manualCostModal = false; render(); }
+  });
+  on('manual-cost-cancel-btn', 'click', () => {
+    app.manualCostModal = false;
+    app.editingManualCostIdx = null;
+    render();
+  });
+  on('manual-cost-save-btn', 'click', () => {
+    const d = app.draft;
+    const name = document.getElementById('manual-cost-name')?.value.trim();
+    const description = document.getElementById('manual-cost-description')?.value.trim();
+    const costRaw = document.getElementById('manual-cost-amount')?.value.trim();
+    const errEl = document.getElementById('manual-cost-error');
+    if (errEl) errEl.textContent = '';
+    if (!name) { if (errEl) errEl.textContent = 'Item name is required.'; return; }
+    const cost = parseFloat(costRaw);
+    if (isNaN(cost) || cost < 0) { if (errEl) errEl.textContent = 'Enter a valid cost of $0 or more.'; return; }
+    if (!d.manualCosts) d.manualCosts = [];
+    const isEditing = app.editingManualCostIdx !== null && app.editingManualCostIdx !== undefined;
+    if (isEditing) {
+      const existing = d.manualCosts[app.editingManualCostIdx];
+      d.manualCosts[app.editingManualCostIdx] = { ...existing, name, description, cost };
+    } else {
+      d.manualCosts.push({ id: 'm_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name, description, cost, excluded: false });
+    }
+    app.manualCostModal = false;
+    app.editingManualCostIdx = null;
+    const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' }, d.manualCosts);
     d.totalProduct   = jobCalc.totalProduct;
     d.totalLabor     = jobCalc.totalLabor;
     d.totalMaterials = jobCalc.totalMaterials;
@@ -4673,7 +4878,7 @@ function attachEvents() {
   });
   on('present-price-dec', 'click', () => {
     const d = app.draft;
-    const jobCalc = calcJob(d.panes, d.supplier, { rounded: true });
+    const jobCalc = calcJob(d.panes, d.supplier, { rounded: true }, d.manualCosts);
     const inc = appConfig.round_increment || 25;
     const incLow = roundToIncrement(rangeBounds(jobCalc.grandTotal).low, inc);
     d.pendingPresentPrice = Math.max(incLow, (d.pendingPresentPrice ?? incLow) - inc);
@@ -4681,7 +4886,7 @@ function attachEvents() {
   });
   on('present-price-inc', 'click', () => {
     const d = app.draft;
-    const jobCalc = calcJob(d.panes, d.supplier, { rounded: true });
+    const jobCalc = calcJob(d.panes, d.supplier, { rounded: true }, d.manualCosts);
     const inc = appConfig.round_increment || 25;
     const incHigh = roundToIncrement(rangeBounds(jobCalc.grandTotal).high, inc);
     d.pendingPresentPrice = Math.min(incHigh, (d.pendingPresentPrice ?? incHigh) + inc);
@@ -4696,7 +4901,7 @@ function attachEvents() {
     d.agreedPrice = d.pendingPresentPrice;
     delete d.pendingPresentPrice;
     if (d.isAdminEdit) {
-      const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' });
+      const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' }, d.manualCosts);
       d.totalProduct   = jobCalc.totalProduct;
       d.totalLabor     = jobCalc.totalLabor;
       d.totalMaterials = jobCalc.totalMaterials;
@@ -4943,7 +5148,7 @@ async function handleLogin() {
 // the job total is left unrounded, same as every other estimating screen.
 function autosaveDraft(d) {
   if (!d || d.isAdminEdit) return;
-  const jobCalc = calcJob(d.panes, d.supplier);
+  const jobCalc = calcJob(d.panes, d.supplier, {}, d.manualCosts);
   const existing = appData.quotes.find(q => q.id === d.id);
   const quote = {
     id:              d.id,
@@ -4998,7 +5203,7 @@ async function deleteDraftIfEmpty(id) {
 ================================================================ */
 function finalizeDraft(status, signatureDataUrl) {
   const d = app.draft;
-  const jobCalc = calcJob(d.panes, d.supplier, { rounded: true });
+  const jobCalc = calcJob(d.panes, d.supplier, { rounded: true }, d.manualCosts);
   const quote = {
     id:              d.id,
     techId:          app.currentUser.id,
@@ -5054,6 +5259,7 @@ function viewQuoteFromHistory(quoteId) {
     toolsRequired: q.toolsRequired || '',
     supplier: q.supplier || getDefaultSupplier(),
     panes: JSON.parse(JSON.stringify(q.panes)),
+    manualCosts: JSON.parse(JSON.stringify(q.manualCosts || [])),
     currentPane: freshPane(),
     editingPaneIdx: null,
     step: 3,
@@ -5087,7 +5293,7 @@ function viewQuoteFromHistory(quoteId) {
 function updateQuoteStatus(status, opts = {}, signatureDataUrl) {
   const d = app.draft;
   if (!d || !d.isAdminEdit) return null;
-  const jobCalc = calcJob(d.panes, d.supplier, { rounded: true });
+  const jobCalc = calcJob(d.panes, d.supplier, { rounded: true }, d.manualCosts);
   const updated = {
     id:              d.id,
     techId:          d.techId,
@@ -5160,7 +5366,7 @@ function openCustomerViewOrGate() {
   const d = app.draft;
   if (!d) return;
   if (d.agreedPrice === undefined || d.agreedPrice === null) {
-    const jobCalc = calcJob(d.panes, d.supplier, { rounded: true });
+    const jobCalc = calcJob(d.panes, d.supplier, { rounded: true }, d.manualCosts);
     if (jobCalc.lineItems.length < d.panes.length) {
       alert('This quote includes items that need a custom quote. Resolve those before presenting a price to the customer.');
       app.pendingSaveAsShown = false;
@@ -5177,7 +5383,7 @@ function openCustomerViewOrGate() {
 async function saveAdminEdit() {
   const d = app.draft;
   if (!d || !d.isAdminEdit) return;
-  const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' });
+  const jobCalc = calcJob(d.panes, d.supplier, { rounded: d.status !== 'draft' }, d.manualCosts);
   const updated = {
     ...d,
     totalProduct:   jobCalc.totalProduct,
