@@ -1272,6 +1272,9 @@ const ENVIRONMENTS = {
 };
 const PRODUCTION_HOSTS = ['fieldpricer.com', 'www.fieldpricer.com', 'jsspirk.github.io'];
 const APP_ENV = PRODUCTION_HOSTS.includes(location.hostname) ? 'production' : 'staging';
+// The Housecall Pro integration is still being built and validated on the
+// test version — keep its Admin tab off the live app until it's signed off.
+const SHOW_INTEGRATIONS = APP_ENV !== 'production';
 const SUPABASE_URL = ENVIRONMENTS[APP_ENV].url;
 const SUPABASE_KEY = ENVIRONMENTS[APP_ENV].key;
 if (!SUPABASE_URL || !SUPABASE_KEY) {
@@ -3220,6 +3223,7 @@ function renderHistoryItem(q, showTech = false) {
 ================================================================ */
 function renderAdmin() {
   const tabs = ['Glass Types', 'Labor & Pricing', 'Materials', 'Quote Log', 'Branding', 'Users'];
+  if (SHOW_INTEGRATIONS) tabs.push('Integrations');
   const t = app.activeTab;
   return `
 <div class="screen" style="background:var(--bg-0);">
@@ -3242,6 +3246,7 @@ function renderAdmin() {
     ${t === 3 ? renderAdminQuoteLog() : ''}
     ${t === 4 ? renderAdminBranding() : ''}
     ${t === 5 ? renderAdminUsers() : ''}
+    ${t === 6 && SHOW_INTEGRATIONS ? renderAdminIntegrations() : ''}
   </div>
 </div>`;
 }
@@ -3958,6 +3963,165 @@ function renderAdminUsers() {
   </div>`;
   }).join('')}
 </div>`;
+}
+
+/* ================================================================
+   ADMIN: INTEGRATIONS (Housecall Pro)
+   All HCP calls go through the hcp-proxy Edge Function; the API key is
+   stored server-side (Supabase Vault) and never comes back to the app.
+================================================================ */
+function hcpEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function hcpDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ', ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+function renderAdminIntegrations() {
+  if (!app.hcp) { app.hcp = {}; setTimeout(loadHcpStatus, 0); }
+  const h = app.hcp;
+  if (h.loading && !h.status) {
+    return `<div class="empty-state"><div class="empty-icon">🔌</div><div class="empty-title">Checking Housecall Pro…</div></div>`;
+  }
+  if (h.error && !h.status) {
+    return `
+<div class="empty-state">
+  <div class="empty-icon">⚠</div>
+  <div class="empty-title">Couldn't load the integration</div>
+  <div class="empty-sub">${hcpEsc(h.error)}</div>
+  <button class="btn btn-secondary mt-12" id="hcp-retry">Retry</button>
+</div>`;
+  }
+  const st = h.status || { connected: false };
+  const busy = h.busy;
+
+  const keyForm = `
+  <div class="card mb-12" style="border-color:var(--amber);">
+    <div class="section-label mb-8">${st.connected ? 'Replace API key' : 'Connect Housecall Pro'}</div>
+    <ol style="margin:0 0 12px;padding-left:18px;font-size:14px;color:var(--text-1);line-height:1.5;">
+      <li>In Housecall Pro, sign in as an admin and open the App Store, then the <b>API</b> app, and generate an API key. Your account needs the MAX plan.</li>
+      <li>Copy the key and paste it below.</li>
+    </ol>
+    <div class="form-group mb-8">
+      <label class="form-label" for="hcp-key-input">API key</label>
+      <input class="form-input" id="hcp-key-input" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Paste key" value="" />
+    </div>
+    <p style="font-size:12px;color:var(--text-2);margin:0 0 10px;">Checked with Housecall Pro before it's saved. Stored encrypted on the server; FieldPricer only ever shows the last 4 characters.</p>
+    ${h.formError ? `<p class="login-error" style="display:block;">${hcpEsc(h.formError)}</p>` : ''}
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" id="hcp-cancel" style="flex:1;" ${busy ? 'disabled' : ''}>Cancel</button>
+      <button class="btn btn-primary" id="hcp-connect-submit" style="flex:2;" ${busy ? 'disabled' : ''}>${busy === 'connect' ? 'Checking key…' : 'Test and connect'}</button>
+    </div>
+  </div>`;
+
+  if (!st.connected) {
+    return `
+<div>
+  <div class="section-label mb-8">Housecall Pro</div>
+  ${h.mode === 'connect' ? keyForm : `
+  <div class="card mb-12">
+    <div class="flex-between mb-8">
+      <div style="font-family:var(--font-semi);font-weight:700;font-size:17px;">Housecall Pro</div>
+      <span class="badge" style="background:var(--bg-3);color:var(--text-2);border:1px solid var(--border-0);">Not connected</span>
+    </div>
+    <p style="font-size:14px;color:var(--text-1);margin:0 0 8px;">Send FieldPricer quotes to Housecall Pro as estimates, and let techs look up HCP customers while they quote.</p>
+    <p style="font-size:13px;color:var(--text-2);margin:0 0 12px;">Needs a Housecall Pro MAX plan and an HCP admin to create the API key.</p>
+    <button class="btn btn-primary btn-full" id="hcp-open-connect">Connect Housecall Pro</button>
+  </div>`}
+</div>`;
+  }
+
+  const testLine = st.lastTestedAt
+    ? (st.lastTestOk
+        ? `<span class="text-green">✓ Working</span> · checked ${hcpDate(st.lastTestedAt)}`
+        : `<span class="text-red">✕ Not working</span> · checked ${hcpDate(st.lastTestedAt)}`)
+    : '';
+
+  return `
+<div>
+  <div class="section-label mb-8">Housecall Pro</div>
+  ${h.notice ? `<div class="card card-tight mb-12" style="border-color:var(--green);font-size:14px;">${hcpEsc(h.notice)}</div>` : ''}
+  ${h.mode === 'connect' ? keyForm : ''}
+  ${h.mode === 'disconnect' ? `
+  <div class="card mb-12" style="border-color:var(--red);">
+    <div style="font-family:var(--font-semi);font-weight:700;font-size:16px;margin-bottom:6px;">Disconnect Housecall Pro?</div>
+    <p style="font-size:14px;color:var(--text-1);margin:0 0 12px;">FieldPricer deletes the stored API key and stops talking to Housecall Pro. Nothing already in Housecall Pro is touched.</p>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" id="hcp-cancel" style="flex:1;" ${busy ? 'disabled' : ''}>Keep connected</button>
+      <button class="btn btn-danger" id="hcp-disconnect-confirm" style="flex:1;" ${busy ? 'disabled' : ''}>${busy === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}</button>
+    </div>
+  </div>` : ''}
+  <div class="card mb-12">
+    <div class="flex-between mb-8">
+      <div style="font-family:var(--font-semi);font-weight:700;font-size:17px;">${hcpEsc(st.companyName || 'Housecall Pro')}</div>
+      ${st.lastTestOk === false
+        ? `<span class="badge" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);">Not working</span>`
+        : `<span class="badge badge-sent">Connected</span>`}
+    </div>
+    <div style="font-size:13px;color:var(--text-2);line-height:1.6;">
+      ${st.mock ? '<div><b style="color:var(--orange);">Mock data</b> · test-only key, not a real Housecall Pro account</div>' : ''}
+      <div>API key ••••${hcpEsc(st.keyLast4)} · added by ${hcpEsc(st.connectedByName || 'an admin')}${st.connectedAt ? ' on ' + hcpDate(st.connectedAt) : ''}</div>
+      ${testLine ? `<div>${testLine}</div>` : ''}
+    </div>
+    ${st.lastTestOk === false && st.lastError ? `<p class="login-error" style="display:block;margin-top:8px;">${hcpEsc(st.lastError)}</p>` : ''}
+    ${h.actionError ? `<p class="login-error" style="display:block;margin-top:8px;">${hcpEsc(h.actionError)}</p>` : ''}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;">
+      <button class="btn btn-secondary btn-sm" id="hcp-test" ${busy ? 'disabled' : ''}>${busy === 'test' ? 'Testing…' : 'Test connection'}</button>
+      <button class="btn btn-secondary btn-sm" id="hcp-open-connect" ${busy ? 'disabled' : ''}>Replace key</button>
+      <button class="btn btn-ghost btn-sm" id="hcp-open-disconnect" ${busy ? 'disabled' : ''} style="color:var(--red);border-color:var(--red);">Disconnect</button>
+    </div>
+  </div>
+
+  ${renderHcpReference()}
+
+  <div class="section-label mb-8 mt-16">Coming next</div>
+  <div class="card card-tight" style="opacity:0.6;font-size:14px;line-height:1.9;">
+    <div>Where quotes go · Field mapping · Team · Sending rules · Sync log</div>
+    <div style="font-size:12px;color:var(--text-2);line-height:1.4;">Set up in the next phase, once the connection is confirmed with your real Housecall Pro account.</div>
+  </div>
+</div>`;
+}
+
+function renderHcpReference() {
+  const h = app.hcp || {};
+  const r = h.ref;
+  let body;
+  if (h.refLoading && !r) {
+    body = `<div style="font-size:14px;color:var(--text-2);">Reading your Housecall Pro setup…</div>`;
+  } else if (h.refError && !r) {
+    body = `<p class="login-error" style="display:block;">${hcpEsc(h.refError)}</p>`;
+  } else if (r) {
+    const list = (label, res, fmt, emptyText) => {
+      if (!res) return '';
+      if (!res.ok) return `<div class="mb-12"><div class="form-label mb-8">${label}</div><div class="text-red" style="font-size:13px;">${hcpEsc(res.error)}</div></div>`;
+      const items = res.items || [];
+      return `<div class="mb-12"><div class="form-label mb-8">${label} · ${items.length}</div>
+        ${items.length ? `<div style="font-size:14px;color:var(--text-1);line-height:1.6;">${items.map(fmt).join('')}</div>` : `<div style="font-size:13px;color:var(--text-2);">${emptyText}</div>`}</div>`;
+    };
+    const locCount = r.locations?.ok ? r.locations.items.length : null;
+    body = `
+      <div class="mb-12" style="font-size:14px;color:var(--text-1);">
+        <div class="form-label mb-8">Locations</div>
+        ${locCount === null ? `<span class="text-red" style="font-size:13px;">${hcpEsc(r.locations?.error)}</span>`
+          : locCount > 1 ? `Multi-location account · ${r.locations.items.map(l => hcpEsc(l.name)).join(', ')}`
+          : 'Single-location account'}
+      </div>
+      ${list('Employees', r.employees, e => `<div>${hcpEsc(e.name)}${e.role ? ` <span style="color:var(--text-2);font-size:12px;">· ${hcpEsc(e.role)}</span>` : ''}</div>`, 'No employees found.')}
+      ${list('Job types', r.jobTypes, t => `<div>${hcpEsc(t.name)}</div>`, 'No job types set up in Housecall Pro.')}
+      ${list('Lead sources', r.leadSources, t => `<div>${hcpEsc(t.name)}</div>`, 'No lead sources set up.')}
+      ${list('Tags', r.tags, t => `<div>${hcpEsc(t.name)}</div>`, 'No tags yet.')}
+      <div style="font-size:12px;color:var(--text-2);">Business units aren't available through Housecall Pro's API.</div>`;
+  } else {
+    body = '';
+  }
+  return `
+  <div class="flex-between mb-8 mt-16">
+    <div class="section-label">What we found in Housecall Pro</div>
+    <button class="btn btn-ghost btn-sm" id="hcp-ref-refresh" ${h.refLoading ? 'disabled' : ''}>${h.refLoading ? 'Loading…' : '↻ Refresh'}</button>
+  </div>
+  <div class="card">${body}</div>`;
 }
 
 /* ================================================================
@@ -5117,8 +5281,26 @@ function attachEvents() {
     if (app.activeTab === 5 && !app.adminUsersList && !app.adminUsersLoading) {
       loadAdminUsers();
     }
+    if (app.activeTab === 6 && SHOW_INTEGRATIONS && !app.hcp?.status && !app.hcp?.loading) {
+      loadHcpStatus();
+    }
     render();
   });
+
+  // ---- ADMIN: INTEGRATIONS ----
+  on('hcp-retry', 'click', () => loadHcpStatus());
+  on('hcp-open-connect', 'click', () => { app.hcp.mode = 'connect'; app.hcp.formError = null; app.hcp.notice = null; render(); document.getElementById('hcp-key-input')?.focus(); });
+  on('hcp-open-disconnect', 'click', () => { app.hcp.mode = 'disconnect'; app.hcp.notice = null; render(); });
+  on('hcp-cancel', 'click', () => { app.hcp.mode = null; app.hcp.formError = null; render(); });
+  // No render() on keystrokes — the key is read straight from the field on submit.
+  on('hcp-key-input', 'keydown', e => { if (e.key === 'Enter') document.getElementById('hcp-connect-submit')?.click(); });
+  on('hcp-connect-submit', 'click', () => {
+    const key = (document.getElementById('hcp-key-input')?.value || '').trim();
+    hcpConnect(key);
+  });
+  on('hcp-test', 'click', () => hcpRun('test', 'test'));
+  on('hcp-disconnect-confirm', 'click', () => hcpRun('disconnect', 'disconnect'));
+  on('hcp-ref-refresh', 'click', () => loadHcpReference());
 
   // ---- ADMIN: USERS ----
   on('admin-users-refresh', 'click', () => loadAdminUsers());
@@ -5603,6 +5785,102 @@ async function loadAdminUsers() {
     app.adminUsersError = e.message || 'Failed to load users';
   } finally {
     app.adminUsersLoading = false;
+    render();
+  }
+}
+
+/* ================================================================
+   HOUSECALL PRO — calls to the hcp-proxy Edge Function
+================================================================ */
+async function callHcp(action, extra = {}) {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) throw new Error('Your session has expired. Sign in again.');
+  let res;
+  try {
+    res = await fetch(`${SUPABASE_URL}/functions/v1/hcp-proxy`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': SUPABASE_KEY,
+      },
+      body: JSON.stringify({ action, ...extra }),
+    });
+  } catch (_e) {
+    throw new Error("Couldn't reach FieldPricer's server. Check your connection and try again.");
+  }
+  const result = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(result.error || 'Something went wrong. Try again.');
+  return result;
+}
+
+async function loadHcpStatus() {
+  app.hcp = app.hcp || {};
+  if (app.hcp.loading) return;
+  app.hcp.loading = true;
+  app.hcp.error = null;
+  render();
+  try {
+    app.hcp.status = await callHcp('status');
+  } catch (e) {
+    app.hcp.error = e.message;
+  } finally {
+    app.hcp.loading = false;
+    render();
+  }
+  if (app.hcp.status?.connected && !app.hcp.ref) loadHcpReference();
+}
+
+async function loadHcpReference() {
+  if (app.hcp.refLoading) return;
+  app.hcp.refLoading = true;
+  app.hcp.refError = null;
+  render();
+  try {
+    app.hcp.ref = await callHcp('reference');
+  } catch (e) {
+    app.hcp.refError = e.message;
+  } finally {
+    app.hcp.refLoading = false;
+    render();
+  }
+}
+
+async function hcpConnect(apiKey) {
+  if (app.hcp.busy) return;
+  if (!apiKey) { app.hcp.formError = 'Paste your Housecall Pro API key first.'; render(); return; }
+  app.hcp.busy = 'connect';
+  app.hcp.formError = null;
+  render();
+  try {
+    app.hcp.status = await callHcp('connect', { apiKey });
+    app.hcp.mode = null;
+    app.hcp.ref = null;
+    app.hcp.notice = `Connected to ${app.hcp.status.companyName || 'Housecall Pro'}.`;
+  } catch (e) {
+    app.hcp.formError = e.message;
+  } finally {
+    app.hcp.busy = null;
+    render();
+  }
+  if (app.hcp.status?.connected && !app.hcp.ref) loadHcpReference();
+}
+
+async function hcpRun(action, busyLabel) {
+  if (app.hcp.busy) return;
+  app.hcp.busy = busyLabel;
+  app.hcp.notice = null;
+  app.hcp.actionError = null;
+  render();
+  try {
+    app.hcp.status = await callHcp(action);
+    if (action === 'disconnect') { app.hcp.mode = null; app.hcp.ref = null; app.hcp.notice = null; }
+    if (action === 'test') app.hcp.notice = app.hcp.status.lastTestOk ? 'Connection works.' : null;
+  } catch (e) {
+    app.hcp.notice = null;
+    app.hcp.actionError = e.message;
+  } finally {
+    app.hcp.busy = null;
     render();
   }
 }
