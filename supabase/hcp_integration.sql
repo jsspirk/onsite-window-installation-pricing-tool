@@ -96,3 +96,13 @@ DROP POLICY IF EXISTS "Admins can update HCP settings" ON public.hcp_settings;
 CREATE POLICY "Admins can update HCP settings" ON public.hcp_settings
   FOR UPDATE TO authenticated
   USING (EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role = 'admin'));
+
+-- ---------------------------------------------------------------------
+-- Customer details + Housecall Pro link on quotes (step 2)
+--   customer_details: { phone, email, street, city, state, zip }
+--   hcp_link:         { customerId, customerName, addressId, workId, workKind, workNumber, linkedAt }
+-- The app only writes these when a quote has them, so the live app keeps
+-- working before this migration is applied there.
+-- ---------------------------------------------------------------------
+ALTER TABLE public.quotes ADD COLUMN IF NOT EXISTS customer_details jsonb;
+ALTER TABLE public.quotes ADD COLUMN IF NOT EXISTS hcp_link jsonb;

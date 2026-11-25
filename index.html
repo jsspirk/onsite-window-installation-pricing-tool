@@ -1777,6 +1777,8 @@ function normalizeQuote(row) {
     techName:        row.tech_name,
     customerName:    row.customer_name,
     customerContact: row.customer_contact,
+    customerDetails: row.customer_details ?? undefined,
+    hcpLink:         row.hcp_link ?? undefined,
     contactType:     row.contact_type,
     jobDate:         row.job_date,
     jobNum:          row.job_num,
@@ -1868,6 +1870,11 @@ async function doSyncQuote(quote, panes, signatureDataUrl) {
     catalog_version:  String(quote.catalogVersion),
     synced_at:        new Date().toISOString(),
   };
+  // Housecall Pro integration fields — only written when a quote actually has
+  // them, so the live database (which doesn't have these columns until the
+  // integration ships) never receives an unknown column.
+  if (quote.customerDetails !== undefined) quoteRow.customer_details = quote.customerDetails;
+  if (quote.hcpLink !== undefined) quoteRow.hcp_link = quote.hcpLink;
   const paneRows = panes.map((p, i) => ({
     id:           p.id,
     quote_id:     quote.id,
@@ -2649,6 +2656,12 @@ function renderNewQuoteStep1() {
           <input class="form-input" id="job-num" placeholder="Optional" value="${d.jobNum||''}" />
         </div>
       </div>
+      ${SHOW_INTEGRATIONS ? `
+      <div style="margin-top:12px;">
+        ${d.hcpLink?.customerId ? hcpLinkSummary(d.hcpLink, d.customerDetails)
+          : (app.hcpAvail?.connected || app.hcpAvail?.unreachable) && !app.lkModal ? renderHcpLookup() : ''}
+        ${renderCustomerDetailsFields(d)}
+      </div>` : ''}
     </div>`}
 
     <!-- PANE TABS -->
@@ -3618,6 +3631,14 @@ function renderQuoteDetail() {
         ${d.jobNum ? `<div style="font-size:13px;color:var(--text-2);">Est# <strong style="color:var(--text-1);">${d.jobNum}</strong></div>` : ''}
         ${d.techName ? `<div style="font-size:13px;color:var(--text-2);">Tech: <strong style="color:var(--text-1);">${d.techName}</strong></div>` : ''}
       </div>
+      ${SHOW_INTEGRATIONS ? `
+      ${(d.customerDetails?.phone || d.customerDetails?.email || hcpDetailsAddrLine(d.customerDetails)) && !d.hcpLink?.customerId ? `
+      <div style="font-size:13px;color:var(--text-1);margin-top:6px;">${hcpEsc([d.customerDetails?.phone, d.customerDetails?.email, hcpDetailsAddrLine(d.customerDetails)].filter(Boolean).join(' · '))}</div>` : ''}
+      <div style="margin-top:10px;">
+        ${d.hcpLink?.customerId ? hcpLinkSummary(d.hcpLink, d.customerDetails)
+          : app.hcpAvail?.connected ? `<button class="btn btn-ghost btn-sm" id="link-hcp-open" ${isLocked ? 'disabled' : ''}>Link to HCP customer</button>`
+          : ''}
+      </div>` : ''}
     </div>
 
     ${isLocked ? `
@@ -3728,6 +3749,7 @@ function renderQuoteDetail() {
   ${app.sendModal ? renderSendModal(jobCalc) : ''}
   ${app.manualCostModal ? renderManualCostModal() : ''}
   ${app.statusSheetOpen && isAdmin ? renderStatusSheet() : ''}
+  ${app.lkModal ? renderLinkHcpModal() : ''}
 </div>`;
 }
 
@@ -3792,6 +3814,8 @@ function openAdminQuote(quoteId) {
     id:              q.id,
     customerName:    q.customerName || '',
     customerContact: q.customerContact || '',
+    customerDetails: q.customerDetails ? { ...q.customerDetails } : undefined,
+    hcpLink:         q.hcpLink ? { ...q.hcpLink } : undefined,
     contactType:     q.contactType || 'phone',
     jobDate:         q.jobDate,
     jobNum:          q.jobNum || '',
@@ -3977,6 +4001,126 @@ function hcpDate(iso) {
   if (!iso) return '';
   const d = new Date(iso);
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ', ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+// ---- Customer lookup (New Quote + Quote Detail "Link to HCP") ----
+// app.hcpAvail: { connected, mock, checkedAt } — whether lookup can be offered (any user).
+async function ensureHcpAvail(force) {
+  if (!SHOW_INTEGRATIONS) return;
+  const a = app.hcpAvail;
+  if (!force && a && Date.now() - a.checkedAt < 5 * 60 * 1000) return;
+  if (app._hcpAvailLoading) return;
+  app._hcpAvailLoading = true;
+  try {
+    const r = await callHcp('available');
+    app.hcpAvail = { connected: !!r.connected, mock: !!r.mock, checkedAt: Date.now() };
+  } catch (_) {
+    app.hcpAvail = { connected: false, unreachable: true, checkedAt: Date.now() };
+  } finally {
+    app._hcpAvailLoading = false;
+    render();
+  }
+}
+function hcpAddrLine(a) {
+  if (!a) return '';
+  return [[a.street, a.street2].filter(Boolean).join(' '), [a.city, [a.state, a.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')].filter(Boolean).join(', ');
+}
+function hcpDetailsAddrLine(cd) {
+  return cd ? hcpAddrLine({ street: cd.street, city: cd.city, state: cd.state, zip: cd.zip }) : '';
+}
+function hcpLinkSummary(link, cd) {
+  if (!link?.customerId) return '';
+  const addr = link.addressId ? hcpDetailsAddrLine(cd) : (hcpDetailsAddrLine(cd) ? hcpDetailsAddrLine(cd) + ' (new address)' : 'No address yet');
+  return `
+  <div class="card card-tight mb-8" style="border-color:var(--green);background:var(--green-bg);">
+    <div class="flex-between gap-8 mb-4">
+      <span class="badge badge-sent">Linked to Housecall Pro</span>
+      <span style="display:flex;gap:6px;">
+        <button class="btn btn-secondary btn-sm" data-lk-change style="min-height:32px;font-size:12px;padding:0 10px;">Change</button>
+        <button class="btn btn-ghost btn-sm" data-lk-unlink style="min-height:32px;font-size:12px;padding:0 10px;">Unlink</button>
+      </span>
+    </div>
+    <div style="font-weight:700;font-size:15px;">${hcpEsc(link.customerName)}</div>
+    <div style="font-size:13px;color:var(--text-1);">${hcpEsc(addr)}</div>
+    ${link.workId ? `<div style="font-size:12px;color:var(--text-2);margin-top:2px;">Related: ${hcpEsc(link.workKind)} #${hcpEsc(link.workNumber)} (reference only)</div>` : ''}
+  </div>`;
+}
+function renderHcpLookup() {
+  const lk = app.lk || { step: 'search', q: '' };
+  if (app.hcpAvail?.unreachable) {
+    return `<div class="card card-tight mb-8" style="border-color:var(--orange);font-size:13px;color:var(--text-1);"><b>Can't reach Housecall Pro.</b> Enter the customer by hand below and keep quoting. You can link this quote to HCP later from Quote Detail.</div>`;
+  }
+  if (lk.step === 'addr' && lk.cust) {
+    return `
+    <div class="card card-tight mb-8" style="border-color:var(--amber);">
+      <div class="flex-between mb-8"><div style="font-weight:700;">${hcpEsc(lk.cust.name)}</div><button class="btn btn-ghost btn-sm" data-lk-back="search" style="min-height:32px;font-size:12px;">Back</button></div>
+      <div class="form-label mb-8">Which address is this job at?</div>
+      ${lk.cust.addresses.map(a => `<button class="btn btn-secondary btn-full mb-8" data-lk-addr="${hcpEsc(a.id)}" style="justify-content:flex-start;text-transform:none;font-family:var(--font-body);font-size:14px;font-weight:600;min-height:44px;letter-spacing:0;">${hcpEsc(hcpAddrLine(a))}</button>`).join('')}
+      <button class="btn btn-ghost btn-full" data-lk-addr="" style="text-transform:none;font-family:var(--font-body);font-size:14px;min-height:44px;letter-spacing:0;">A different address (enter it below)</button>
+    </div>`;
+  }
+  if (lk.step === 'work' && lk.cust) {
+    const items = lk.work || [];
+    return `
+    <div class="card card-tight mb-8" style="border-color:var(--amber);">
+      <div class="flex-between mb-8"><div style="font-weight:700;">${hcpEsc(lk.cust.name)}</div><button class="btn btn-ghost btn-sm" data-lk-back="addr" style="min-height:32px;font-size:12px;">Back</button></div>
+      <div class="form-label mb-4">Related to existing HCP work? (optional)</div>
+      <div style="font-size:12px;color:var(--text-2);margin-bottom:8px;">For reference only. Sending still creates a new estimate; existing HCP work isn't changed.</div>
+      ${lk.workLoading ? '<div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">Loading jobs and estimates…</div>' : ''}
+      ${lk.workError ? `<div style="font-size:13px;color:var(--orange);margin-bottom:8px;">${hcpEsc(lk.workError)}</div>` : ''}
+      ${items.map(w => `<button class="btn btn-secondary btn-full mb-8" data-lk-work="${hcpEsc(w.id)}" style="justify-content:space-between;text-transform:none;font-family:var(--font-body);font-size:14px;font-weight:600;min-height:44px;letter-spacing:0;"><span>${hcpEsc(w.kind)} #${hcpEsc(w.number)}${w.date ? ' · ' + hcpEsc(fmtDate(w.date)) : ''}</span><span style="font-size:12px;color:var(--text-2);text-transform:capitalize;">${hcpEsc(w.status)}</span></button>`).join('')}
+      ${!lk.workLoading && !items.length && !lk.workError ? '<div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">No jobs or estimates for this customer yet.</div>' : ''}
+      <button class="btn btn-primary btn-full" data-lk-work="">${items.length ? 'Skip, not related' : 'Continue'}</button>
+    </div>`;
+  }
+  let results = '';
+  if (lk.q.trim().length >= 2) {
+    if (lk.loading && !lk.results) results = '<div style="font-size:13px;color:var(--text-2);padding:6px 2px;">Searching Housecall Pro…</div>';
+    else if (lk.error) results = `<div style="font-size:13px;color:var(--orange);padding:6px 2px;">${hcpEsc(lk.error)} Enter the customer by hand below.</div>`;
+    else if (lk.results && !lk.results.length) results = `<div style="font-size:13px;color:var(--text-2);padding:6px 2px;">No Housecall Pro customer matches "${hcpEsc(lk.q.trim())}". Enter them below; they're added to HCP when the quote is sent.</div>`;
+    else if (lk.results) results = lk.results.map((c, i) => `
+      <button class="btn btn-secondary btn-full mb-8" data-lk-cust="${i}" style="justify-content:space-between;text-transform:none;font-family:var(--font-body);min-height:48px;letter-spacing:0;text-align:left;">
+        <span><span style="font-weight:700;font-size:15px;display:block;">${hcpEsc(c.name)}</span><span style="font-size:12px;color:var(--text-2);font-weight:500;">${hcpEsc([c.phone, c.email].filter(Boolean).join(' · '))}</span></span>
+        <span style="font-size:12px;color:var(--text-2);font-weight:500;white-space:nowrap;">${c.addresses.length} address${c.addresses.length === 1 ? '' : 'es'}</span>
+      </button>`).join('');
+  }
+  return `
+  <div class="form-group mb-8">
+    <label class="form-label" for="hcp-lk-q">Find in Housecall Pro</label>
+    <input class="form-input" id="hcp-lk-q" placeholder="Name, phone or email" value="${hcpEsc(lk.q)}" autocomplete="off" />
+  </div>
+  ${results}`;
+}
+function renderCustomerDetailsFields(d) {
+  const cd = d.customerDetails || {};
+  const f = (id, key, label, ph, mode, style) => `
+    <div class="form-group" style="${style || ''}">
+      <label class="form-label" for="${id}">${label}</label>
+      <input class="form-input" id="${id}" data-cd="${key}" value="${hcpEsc(cd[key] || '')}" placeholder="${ph}" ${mode ? `inputmode="${mode}"` : ''} autocomplete="off" />
+    </div>`;
+  return `
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
+    ${f('cd-phone', 'phone', 'Phone', 'Optional', 'tel')}
+    ${f('cd-email', 'email', 'Email', 'Optional', 'email')}
+  </div>
+  ${f('cd-street', 'street', 'Service address', 'Street', '', 'margin-top:10px;')}
+  <div style="display:grid;grid-template-columns:2fr 1fr 1.2fr;gap:10px;margin-top:10px;">
+    ${f('cd-city', 'city', 'City', '')}
+    ${f('cd-state', 'state', 'State', '')}
+    ${f('cd-zip', 'zip', 'ZIP', '', 'numeric')}
+  </div>`;
+}
+function renderLinkHcpModal() {
+  return `
+<div class="modal-overlay" id="link-hcp-overlay">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div style="font-family:var(--font-title);font-weight:800;font-size:22px;margin-bottom:6px;">Link to Housecall Pro</div>
+    <p style="font-size:13px;color:var(--text-2);margin:0 0 12px;">Find this quote's customer in Housecall Pro. Their HCP name, phone, email and address replace what's on the quote.</p>
+    ${renderHcpLookup()}
+    <button class="btn btn-secondary btn-full mt-8" id="link-hcp-cancel">Cancel</button>
+  </div>
+</div>`;
 }
 
 // ---- Settings: defaults, merge, path helpers ----
@@ -4534,6 +4678,8 @@ function renderCustomerView(quoteId) {
     q = {
       customerName: d.customerName,
       customerContact: d.customerContact,
+      customerDetails: d.customerDetails,
+      hcpLink:         d.hcpLink,
       jobDate: d.jobDate,
       panes: d.panes,
       manualCosts: d.manualCosts,
@@ -4871,6 +5017,67 @@ function attachEvents() {
   on('cust-contact',      'input',  e => { app.draft.customerContact = e.target.value; debouncedCustomerAutosave(); });
   on('cust-contact-type', 'change', e => { app.draft.contactType     = e.target.value; debouncedCustomerAutosave(); });
   on('job-num',           'input',  e => { app.draft.jobNum          = e.target.value; debouncedCustomerAutosave(); });
+
+  // ---- Customer details + Housecall Pro lookup ----
+  if (SHOW_INTEGRATIONS && (app.route === 'new-quote' || app.route === 'quote-detail')) ensureHcpAvail();
+  delegate('[data-cd]', 'input', e => {
+    const d = app.draft; if (!d) return;
+    const k = e.currentTarget.dataset.cd;
+    d.customerDetails = { ...(d.customerDetails || {}), [k]: e.target.value };
+    // Editing the address by hand means it's no longer the HCP address that was picked.
+    if (['street', 'city', 'state', 'zip'].includes(k) && d.hcpLink?.addressId) {
+      d.hcpLink = { ...d.hcpLink, addressId: null };
+      const id = e.currentTarget.id, pos = e.currentTarget.selectionStart;
+      render();
+      const n = document.getElementById(id); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (_) {} }
+    }
+    debouncedCustomerAutosave();
+  });
+  on('hcp-lk-q', 'input', e => {
+    app.lk = { ...(app.lk || { step: 'search' }), q: e.target.value, error: null };
+    clearTimeout(app._lkTimer);
+    const q = e.target.value.trim();
+    if (q.length < 2) { app.lk.results = null; app.lk.loading = false; }
+    else app._lkTimer = setTimeout(() => hcpLookupSearch(q), 350);
+  });
+  delegate('[data-lk-cust]', 'click', e => {
+    const c = app.lk.results[+e.currentTarget.dataset.lkCust];
+    app.lk = { ...app.lk, cust: c, step: c.addresses.length ? 'addr' : 'work', addrId: null, work: null };
+    if (!c.addresses.length) hcpLookupWork(c.id);
+    render();
+  });
+  delegate('[data-lk-addr]', 'click', e => {
+    app.lk.addrId = e.currentTarget.dataset.lkAddr || null;
+    app.lk.step = 'work';
+    hcpLookupWork(app.lk.cust.id);
+    render();
+  });
+  delegate('[data-lk-work]', 'click', e => {
+    const id = e.currentTarget.dataset.lkWork;
+    hcpApplyLookup((app.lk.work || []).find(w => w.id === id) || null);
+  });
+  delegate('[data-lk-back]', 'click', e => { app.lk.step = e.currentTarget.dataset.lkBack; render(); });
+  delegate('[data-lk-change]', 'click', () => {
+    app.lk = { step: 'search', q: app.draft?.hcpLink?.customerName || '' };
+    if (app.route === 'quote-detail') { app.lkModal = true; render(); hcpLookupSearch(app.lk.q); return; }
+    app.draft.hcpLink = { ...(app.draft.hcpLink || {}), customerId: null };
+    render(); hcpLookupSearch(app.lk.q);
+  });
+  delegate('[data-lk-unlink]', 'click', () => {
+    const d = app.draft; if (!d) return;
+    d.hcpLink = {};
+    app.lk = { step: 'search', q: '' };
+    if (d.isAdminEdit && app.route === 'quote-detail') updateQuoteStatus(d.status, { keepDraft: true });
+    else debouncedCustomerAutosave();
+    render();
+  });
+  on('link-hcp-open', 'click', () => {
+    app.lk = { step: 'search', q: app.draft?.customerDetails?.phone || app.draft?.customerName || '' };
+    app.lkModal = true; render();
+    if (app.lk.q.trim().length >= 2) hcpLookupSearch(app.lk.q.trim());
+  });
+  on('link-hcp-cancel', 'click', () => { app.lkModal = false; app.lk = null; render(); });
+  on('link-hcp-overlay', 'click', e => { if (e.target.id === 'link-hcp-overlay') { app.lkModal = false; app.lk = null; render(); } });
 
   // Deferred render for price preview — fires only after the user has stopped interacting
   const deferredRender = () => {
@@ -5884,6 +6091,8 @@ function autosaveDraft(d) {
     techName:        app.currentUser.name,
     customerName:    d.customerName,
     customerContact: d.customerContact,
+    customerDetails: d.customerDetails,
+    hcpLink:         d.hcpLink,
     contactType:     d.contactType,
     jobDate:         d.jobDate,
     jobNum:          d.jobNum || '',
@@ -5938,6 +6147,8 @@ function finalizeDraft(status, signatureDataUrl) {
     techName:        app.currentUser.name,
     customerName:    d.customerName,
     customerContact: d.customerContact,
+    customerDetails: d.customerDetails,
+    hcpLink:         d.hcpLink,
     contactType:     d.contactType,
     jobDate:         d.jobDate,
     jobNum:          d.jobNum || '',
@@ -5980,6 +6191,8 @@ function viewQuoteFromHistory(quoteId) {
     id: q.id,
     customerName: q.customerName || '',
     customerContact: q.customerContact || '',
+    customerDetails: q.customerDetails ? { ...q.customerDetails } : undefined,
+    hcpLink:         q.hcpLink ? { ...q.hcpLink } : undefined,
     contactType: q.contactType || 'phone',
     jobDate: q.jobDate,
     jobNum: q.jobNum || '',
@@ -6028,6 +6241,8 @@ function updateQuoteStatus(status, opts = {}, signatureDataUrl) {
     techName:        d.techName,
     customerName:    d.customerName,
     customerContact: d.customerContact,
+    customerDetails: d.customerDetails,
+    hcpLink:         d.hcpLink,
     contactType:     d.contactType,
     jobDate:         d.jobDate,
     jobNum:          d.jobNum || '',
@@ -6315,6 +6530,68 @@ async function hcpRun(action, busyLabel) {
     app.hcp.busy = null;
     render();
   }
+}
+
+async function hcpLookupSearch(q) {
+  if (!q || q.length < 2) return;
+  const seq = (app._lkSeq = (app._lkSeq || 0) + 1);
+  app.lk = { ...(app.lk || { step: 'search' }), loading: true, error: null };
+  try {
+    const r = await callHcp('searchCustomers', { q });
+    if (seq !== app._lkSeq || !app.lk) return;           // a newer search replaced this one
+    app.lk.results = r.customers || [];
+  } catch (e) {
+    if (seq !== app._lkSeq || !app.lk) return;
+    app.lk.results = null;
+    app.lk.error = /reach|connection/i.test(e.message) ? "Can't reach Housecall Pro right now." : e.message;
+  } finally {
+    if (seq === app._lkSeq && app.lk) app.lk.loading = false;
+  }
+  const focused = document.activeElement?.id === 'hcp-lk-q', pos = document.activeElement?.selectionStart;
+  render();
+  if (focused) { const n = document.getElementById('hcp-lk-q'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (_) {} } }
+}
+async function hcpLookupWork(customerId) {
+  app.lk.workLoading = true; app.lk.workError = null; app.lk.work = null;
+  try {
+    const r = await callHcp('customerWork', { customerId });
+    if (!app.lk || app.lk.cust?.id !== customerId) return;
+    // Work at the chosen address first; keep the rest (a customer's work can span addresses).
+    const w = r.work || [];
+    app.lk.work = app.lk.addrId ? [...w.filter(x => x.addressId === app.lk.addrId), ...w.filter(x => x.addressId !== app.lk.addrId)] : w;
+    if (r.error) app.lk.workError = r.error;
+  } catch (e) {
+    if (app.lk) app.lk.workError = "Couldn't load this customer's jobs and estimates. You can skip this step.";
+  } finally {
+    if (app.lk) app.lk.workLoading = false;
+    render();
+  }
+}
+// Pull the chosen HCP customer onto the draft/quote: HCP name, phone, email
+// and (if picked) address win over what was typed.
+function hcpApplyLookup(work) {
+  const d = app.draft, lk = app.lk;
+  if (!d || !lk?.cust) return;
+  const c = lk.cust, a = c.addresses.find(x => x.id === lk.addrId) || null;
+  const prev = d.customerDetails || {};
+  d.customerName = c.name;
+  d.customerDetails = {
+    ...prev,
+    phone: c.phone || prev.phone || '',
+    email: c.email || prev.email || '',
+    ...(a ? { street: [a.street, a.street2].filter(Boolean).join(' '), city: a.city, state: a.state, zip: a.zip } : {}),
+  };
+  d.hcpLink = {
+    customerId: c.id, customerName: c.name, addressId: a?.id || null,
+    workId: work?.id || null, workKind: work?.kind || null, workNumber: work?.number || null,
+    linkedAt: new Date().toISOString(),
+  };
+  app.lk = null;
+  const wasModal = app.lkModal;
+  app.lkModal = false;
+  if (d.isAdminEdit && wasModal) updateQuoteStatus(d.status, { keepDraft: true });
+  else if (!d.isAdminEdit && d.panes.length) autosaveDraft(d);
+  render();
 }
 
 /* ================================================================
