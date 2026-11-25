@@ -4569,6 +4569,123 @@ function renderHcpLog() {
     ${body}`;
 }
 
+// ---- Demo data (test version only) ----
+// Five sample quotes that walk through every Send path. Built here so the
+// prices come from the real pricing engine; written by hcp-proxy resetDemo.
+const DEMO_QUOTES = [
+  { key: 'dana', customer: 'Dana Whitfield', status: 'sent', jobNum: '2611',
+    details: { phone: '(303) 555-0148', email: 'dana.w@example.com', street: '1820 Pearl St', city: 'Boulder', state: 'CO', zip: '80302' },
+    link: { customerId: 'cus_mock_dana', customerName: 'Dana Whitfield', addressId: 'adr_mock_1', workId: 'est_mock_1038', workKind: 'Estimate', workNumber: '1038' },
+    panes: [
+      { location: 'Kitchen', width: 36, height: 60, unitType: 'double_pane', thickness: '1/8"', coating: 'c270', finish: 'tempered' },
+      { location: 'Living room', width: 48, height: 60, unitType: 'double_pane', thickness: '1/8"', coating: 'clear', finish: 'annealed', grid: 'standard' },
+    ] },
+  { key: 'pond', customer: 'Ponderosa Property Mgmt', status: 'sent', jobNum: '2612',
+    details: { phone: '(720) 555-0102', email: 'maint@example.com', street: '2400 Baseline Rd Bldg A', city: 'Boulder', state: 'CO', zip: '80305' },
+    link: { customerId: 'cus_mock_pond', customerName: 'Ponderosa Property Mgmt', addressId: 'adr_mock_4', workId: null, workKind: null, workNumber: null },
+    panes: [
+      { location: 'Lobby door', width: 36, height: 80, unitType: 'single_pane', thickness: '1/4"', coating: 'clear', finish: 'tempered' },
+      { location: 'Office 2', width: 30, height: 48, unitType: 'double_pane', thickness: '1/8"', coating: 'clear', finish: 'annealed', qty: 2 },
+      { location: 'Office 3 (owner deciding)', width: 30, height: 48, unitType: 'double_pane', thickness: '1/8"', coating: 'clear', finish: 'annealed', excluded: true },
+    ],
+    manual: [{ name: 'After-hours access', description: 'Building requires evening work', cost: 125 }] },
+  { key: 'maria', customer: 'Maria Lopez', status: 'approved', jobNum: '2613', signed: true,
+    details: { phone: '(720) 555-0911', email: 'maria@example.com', street: '12 Oak Ct', city: 'Boulder', state: 'CO', zip: '80301' },
+    panes: [
+      { location: 'Bath', width: 30, height: 48, unitType: 'double_pane', thickness: '1/8"', coating: 'clear', finish: 'tempered' },
+      { location: 'Hall', width: 24, height: 36, unitType: 'double_pane', thickness: '1/8"', coating: 'c270', finish: 'annealed' },
+    ] },
+  { key: 'ray', customer: 'Ray Okafor', status: 'draft', jobNum: '',
+    details: { phone: '(303) 555-0177', email: 'ray.okafor@example.com', street: '918 Mapleton Ave', city: 'Boulder', state: 'CO', zip: '80304' },
+    panes: [{ location: 'Front window', width: 60, height: 48, unitType: 'double_pane', thickness: '1/8"', coating: 'clear', finish: 'annealed' }] },
+  { key: 'zz', customer: 'ZZ TEST Demo Customer', status: 'sent', jobNum: '2615',
+    details: { phone: '(303) 555-0100', email: 'zztest@example.com', street: '100 Test St', city: 'Boulder', state: 'CO', zip: '80302' },
+    panes: [{ location: 'Test window', width: 24, height: 24, unitType: 'double_pane', thickness: '1/8"', coating: 'clear', finish: 'annealed' }] },
+];
+function hcpDemoSignaturePng() {
+  const c = document.createElement('canvas'); c.width = 360; c.height = 120;
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 360, 120);
+  g.strokeStyle = '#1a2a6c'; g.lineWidth = 3; g.lineCap = 'round'; g.beginPath(); g.moveTo(20, 80);
+  for (let x = 20; x <= 330; x += 6) g.lineTo(x, 70 + Math.sin(x / 13) * 22 + Math.cos(x / 5) * 6);
+  g.stroke();
+  return c.toDataURL('image/png').split(',')[1];
+}
+function hcpBuildDemoQuotes(tech) {
+  const supplier = getDefaultSupplier();
+  const now = Date.now();
+  return DEMO_QUOTES.map((dq, i) => {
+    const id = 'q_demo_' + dq.key;
+    const panes = dq.panes.map((p, j) => ({ ...freshPane(), ...p, id: `${id}_p${j}`, qty: p.qty || 1, grid: p.grid || 'none', excluded: !!p.excluded }));
+    panes.forEach(p => { const r = calcPane(p, supplier); if (!r || r.requiresQuote) throw new Error(`Demo item "${p.location}" doesn't price with the current catalog.`); });
+    const manualCosts = (dq.manual || []).map((m, j) => ({ id: `${id}_m${j}`, ...m, excluded: false }));
+    const calc = calcJob(panes, supplier, { rounded: dq.status !== 'draft' }, manualCosts);
+    const { totalLow, totalHigh } = calcItemRanges(panes, supplier);
+    const manualSum = sumManualCosts(manualCosts);
+    const agreed = dq.status === 'draft' ? null : roundToIncrement((totalLow + totalHigh) / 2, appConfig.round_increment || 25) + manualSum;
+    const created = new Date(now - (DEMO_QUOTES.length - i) * 3600 * 1000).toISOString();
+    return {
+      signaturePngBase64: dq.signed ? hcpDemoSignaturePng() : null,
+      row: {
+        id, tech_id: tech.id, tech_name: tech.name, customer_name: dq.customer, customer_contact: dq.details.phone, contact_type: 'phone',
+        job_date: created, job_num: dq.jobNum, notes: '', tools_required: '', status: dq.status, supplier,
+        total_product: calc.totalProduct, total_labor: calc.totalLabor, total_materials: calc.totalMaterials, grand_total: calc.grandTotal,
+        agreed_price: agreed, customer_approved: !!dq.signed, approved_at: dq.signed ? created : null, signature_url: null,
+        catalog_version: String(appData.catalog?.version ?? ''), created_at: created, synced_at: created,
+        customer_details: dq.details, hcp_link: dq.link || {}, hcp_sync: null,
+      },
+      panes: panes.map((p, j) => ({
+        id: p.id, quote_id: id, sort_order: j, thickness: p.thickness, coating: p.coating, finish: p.finish, grid: p.grid, shape: p.shape || 'standard',
+        location: p.location || '', qty: p.qty, width_whole: String(p.width), width_frac: '', height_whole: String(p.height), height_frac: '',
+        width: p.width, height: p.height, unit: 'in', labor_hrs: p.laborHrs ?? 1.0, story_level: p.storyLevel || 'ground', unit_type: p.unitType, excluded: p.excluded,
+      })),
+      manualCosts: manualCosts.map((m, j) => ({ id: m.id, quote_id: id, sort_order: j, name: m.name, description: m.description || '', cost: m.cost, excluded: false })),
+    };
+  });
+}
+async function hcpResetDemo() {
+  const h = app.hcp;
+  if (h.busy) return;
+  h.busy = 'reset'; h.demoError = null; render();
+  try {
+    const { data: profs } = await sb.from('profiles').select('id, name, role, is_active');
+    const tech = (profs || []).find(p => p.role === 'tech' && p.is_active !== false) || { id: app.currentUser.id, name: app.currentUser.name };
+    const r = await callHcp('resetDemo', { quotes: hcpBuildDemoQuotes(tech) });
+    await loadQuotes();
+    app.hcp = { notice2: `Demo data reset: ${r.created} sample quotes ready, sync log cleared, settings back to defaults, connected to the mock key.` };
+    app.hcpAvail = null; app.hcpSet = null;
+    await loadHcpStatus();
+  } catch (e) {
+    h.demoError = e.message;
+  } finally {
+    if (app.hcp) app.hcp.busy = null;
+    render();
+  }
+}
+function renderHcpDemoTools() {
+  if (APP_ENV === 'production') return '';
+  const h = app.hcp;
+  return `
+  <div class="section-label mb-8 mt-16">Demo tools (test version only)</div>
+  <div class="card card-tight" style="border-style:dashed;">
+    ${h.demoConfirm ? `
+      <div style="font-weight:600;font-size:15px;margin-bottom:4px;">Reset the demo?</div>
+      <ul style="margin:0 0 10px;padding-left:18px;font-size:13px;color:var(--text-1);line-height:1.5;">
+        <li>Replaces the 5 sample quotes (Dana, Ponderosa, Maria, Ray, ZZ TEST) with fresh copies</li>
+        <li>Clears the sync log and resets Integrations settings to defaults</li>
+        <li>Connects the mock key. Quotes you created yourself aren't touched.</li>
+      </ul>
+      ${h.demoError ? `<p class="login-error" style="display:block;">${hcpEsc(h.demoError)}</p>` : ''}
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary btn-sm" id="hcp-demo-cancel" style="flex:1;" ${h.busy ? 'disabled' : ''}>Cancel</button>
+        <button class="btn btn-primary btn-sm" id="hcp-demo-go" style="flex:1;" ${h.busy ? 'disabled' : ''}>${h.busy === 'reset' ? 'Resetting…' : 'Reset demo'}</button>
+      </div>` : `
+      <div class="flex-between gap-12">
+        <div style="font-size:13px;color:var(--text-2);">Start every demo from the same sample quotes, an empty sync log and default settings.</div>
+        <button class="btn btn-secondary btn-sm" id="hcp-demo-open" style="flex-shrink:0;">Reset demo data</button>
+      </div>`}
+  </div>`;
+}
+
 function hcpSetupRows() {
   const st = hcpSettings(), status = app.hcp.status || {};
   const destLabel = { estimate: 'New estimate in HCP', option: 'New option on an existing estimate', job: 'New job in HCP' }[st.destination] || 'New estimate in HCP';
@@ -4652,6 +4769,7 @@ function renderAdminIntegrations() {
     <p style="font-size:13px;color:var(--text-2);margin:0 0 12px;">Needs a Housecall Pro MAX plan and an HCP admin to create the API key.</p>
     <button class="btn btn-primary btn-full" id="hcp-open-connect">Connect Housecall Pro</button>
   </div>`}
+  ${renderHcpDemoTools()}
 </div>`;
   }
 
@@ -4700,6 +4818,7 @@ function renderAdminIntegrations() {
   ${hcpSetupRows()}
 
   ${renderHcpReference()}
+  ${renderHcpDemoTools()}
 </div>`;
 }
 
@@ -5996,6 +6115,9 @@ function attachEvents() {
   on('hcp-disconnect-confirm', 'click', () => hcpRun('disconnect', 'disconnect'));
   on('hcp-ref-refresh', 'click', () => loadHcpReference());
   on('hcp-log-refresh', 'click', () => loadHcpLog());
+  on('hcp-demo-open', 'click', () => { app.hcp.demoConfirm = true; app.hcp.demoError = null; render(); });
+  on('hcp-demo-cancel', 'click', () => { app.hcp.demoConfirm = false; render(); });
+  on('hcp-demo-go', 'click', () => hcpResetDemo());
   delegate('[data-hcp-log]', 'click', e => {
     if (e.target.closest('[data-hcp-retry]')) return;
     const id = +e.currentTarget.dataset.hcpLog;

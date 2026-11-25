@@ -22,6 +22,12 @@
 //   Never sends anything to the customer (no send_estimate call). Everything
 //   created is tagged "fieldpricer-test". Mock keys simulate every step.
 //
+// Demo reset (admins, TEST VERSION ONLY — refused unless HCP_ALLOW_MOCK=true):
+//   resetDemo → { quotes: [{ row, panes, manualCosts, signaturePngBase64? }] }
+//   Replaces the demo quotes (ids starting q_demo_), clears the sync log,
+//   resets integration settings and reconnects the mock key. Quotes it didn't
+//   create are never touched.
+//
 // Mock mode (STAGING ONLY): when the HCP_ALLOW_MOCK secret is "true", an API
 // key starting with "mock_" is answered with fixture data instead of calling
 // Housecall Pro ("mock_reject" simulates a rejected key). Never set
@@ -628,6 +634,44 @@ Deno.serve(async (req) => {
           await admin.from('hcp_sync_log').insert({ ...logBase, result: 'failed', error: msg });
           return json({ error: msg, kind: e instanceof HcpError ? e.kind : (e instanceof SendError ? 'blocked' : 'unexpected') }, e instanceof SendError ? 400 : 502);
         }
+      }
+
+      case 'resetDemo': {
+        if (!allowMock()) return json({ error: 'Demo reset is only available on the test version.' }, 403);
+        const quotes = Array.isArray(body.quotes) ? body.quotes : [];
+        if (!quotes.length || quotes.length > 12 || quotes.some((q: any) => !String(q?.row?.id || '').startsWith('q_demo_'))) {
+          return json({ error: 'Invalid demo data.' }, 400);
+        }
+        // Earlier hand-made test quotes from the build (replaced by the demo set).
+        const LEGACY = ['q_mwvsq7cksbjr', 'q_mwvt8g7c4fg9', 'q_mwvt8mryujvh'];
+        const { data: old } = await admin.from('quotes').select('id').or(`id.like.q_demo_%,id.in.(${LEGACY.join(',')})`);
+        const oldIds = (old || []).map((r: any) => r.id);
+        if (oldIds.length) {
+          await admin.from('panes').delete().in('quote_id', oldIds);
+          await admin.from('manual_costs').delete().in('quote_id', oldIds);
+          await admin.from('quotes').delete().in('id', oldIds);
+          await admin.storage.from('signatures').remove(oldIds.map((id: string) => `${id}.png`));
+        }
+        for (const q of quotes) {
+          if (q.signaturePngBase64) {
+            const bytes = Uint8Array.from(atob(q.signaturePngBase64), c => c.charCodeAt(0));
+            const path = `${q.row.id}.png`;
+            const { error: upErr } = await admin.storage.from('signatures').upload(path, bytes, { upsert: true, contentType: 'image/png' });
+            if (upErr) return json({ error: 'Signature upload failed: ' + upErr.message }, 500);
+            q.row.signature_url = path;
+          }
+          const { error: qErr } = await admin.from('quotes').insert(q.row);
+          if (qErr) return json({ error: `Couldn't create ${q.row.customer_name}: ${qErr.message}` }, 500);
+          if (q.panes?.length) { const { error } = await admin.from('panes').insert(q.panes); if (error) return json({ error: 'Items: ' + error.message }, 500); }
+          if (q.manualCosts?.length) { const { error } = await admin.from('manual_costs').insert(q.manualCosts); if (error) return json({ error: 'Manual costs: ' + error.message }, 500); }
+        }
+        await admin.from('hcp_sync_log').delete().gte('id', 0);
+        await admin.from('hcp_settings').upsert({ id: 1, settings: {}, updated_by: user.id, updated_at: new Date().toISOString() });
+        await admin.rpc('hcp_set_api_key', { p_key: 'mock_demo' });
+        const now = new Date().toISOString();
+        await admin.from('hcp_connection').upsert({ id: 1, key_last4: 'demo', company_id: 'mock-company', company_name: 'FastGlass (mock data)', location_count: 0,
+          connected_by: user.id, connected_at: now, last_tested_at: now, last_test_ok: true, last_error: null });
+        return json({ ok: true, replaced: oldIds.length, created: quotes.length });
       }
 
       default:
