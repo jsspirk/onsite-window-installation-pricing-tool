@@ -1289,6 +1289,45 @@ test('manual costs are flat: subtracting their sum before distributePrice keeps 
     });
 });
 
+// ─── Housecall Pro: field-mapping templates and cent-exact line items ────────
+// Mirrors hcpFill() in index.html — keep in sync.
+function hcpFill(tpl, vals) {
+  const out = String(tpl || '').replace(/\{(\w+)\}/g, (_, k) => String(vals[k] ?? '').trim());
+  return out.split('·').map(x => x.trim()).filter(Boolean).join(' · ').replace(/\s{2,}/g, ' ').trim();
+}
+
+section('HCP. Field-mapping templates and cents');
+
+test('fills tokens with values', () => {
+  assert.strictEqual(hcpFill('{location} · {size} {unit_type}', { location: 'Kitchen', size: '36×60"', unit_type: 'Double Pane' }), 'Kitchen · 36×60" Double Pane');
+});
+test('empty value drops its separator (no leading "·")', () => {
+  assert.strictEqual(hcpFill('{location} · {size} {unit_type}', { location: '', size: '36×60"', unit_type: 'Double Pane' }), '36×60" Double Pane');
+});
+test('empty value in the middle leaves no doubled separator', () => {
+  assert.strictEqual(hcpFill('{glass} · {grid} · {location}', { glass: 'Clear', grid: '', location: 'Bath' }), 'Clear · Bath');
+});
+test('unknown token renders as empty', () => {
+  assert.strictEqual(hcpFill('Estimate {nope} {quote_number}', { quote_number: '1042' }), 'Estimate 1042');
+});
+test('values that themselves contain "·" keep their parts', () => {
+  assert.strictEqual(hcpFill('{glass} · {grid}', { glass: '1/4" · Clear · Temp.', grid: 'Grid' }), '1/4" · Clear · Temp. · Grid');
+});
+test('line items in cents always sum to the quoted price in cents', () => {
+  // Same split as the app: distributePrice over the panes, manual costs on top, each converted with Math.round(x*100).
+  const panes = [pane({ width: 17, height: 23 }), pane({ width: 41, height: 29 }), pane({ width: 30, height: 30 })];
+  const manualCosts = [manualCost({ id: 'm1', cost: 63.50 }), manualCost({ id: 'm2', cost: 11.25 })];
+  const manualSum = sumManualCosts(manualCosts);
+  const ranges = calcItemRanges(panes, 'busick');
+  for (let i = 0; i <= 40; i++) {
+    const finalPrice = +(ranges.totalLow + manualSum + (ranges.totalHigh - ranges.totalLow) * (i / 40)).toFixed(2);
+    const dist = distributePrice(finalPrice - manualSum, ranges);
+    const cents = dist.reduce((s, d) => s + Math.round(d.price * 100), 0)
+      + manualCosts.reduce((s, m) => s + Math.round(m.cost * 100), 0);
+    assert.strictEqual(cents, Math.round(finalPrice * 100), `price ${finalPrice}: lines sum to ${cents} cents`);
+  }
+});
+
 // ─── Summary ─────────────────────────────────────────────────────────────────
 
 console.log('\n' + '═'.repeat(50));

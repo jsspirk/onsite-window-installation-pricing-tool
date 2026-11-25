@@ -67,3 +67,32 @@ REVOKE ALL ON FUNCTION public.hcp_clear_api_key()     FROM PUBLIC, anon, authent
 GRANT EXECUTE ON FUNCTION public.hcp_get_api_key()     TO service_role;
 GRANT EXECUTE ON FUNCTION public.hcp_set_api_key(text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.hcp_clear_api_key()   TO service_role;
+
+-- ---------------------------------------------------------------------
+-- Integration settings (destination, field mapping, team, sending rules)
+-- One row of JSON. Everyone signed in can read it (techs need to know
+-- whether they may send); only admins can change it. The Edge Function
+-- also enforces the sending rules server-side.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.hcp_settings (
+  id         integer PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  settings   jsonb NOT NULL DEFAULT '{}'::jsonb,
+  updated_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  updated_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.hcp_settings ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Signed-in users can read HCP settings" ON public.hcp_settings;
+CREATE POLICY "Signed-in users can read HCP settings" ON public.hcp_settings
+  FOR SELECT TO authenticated USING (true);
+
+DROP POLICY IF EXISTS "Admins can insert HCP settings" ON public.hcp_settings;
+CREATE POLICY "Admins can insert HCP settings" ON public.hcp_settings
+  FOR INSERT TO authenticated
+  WITH CHECK (EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role = 'admin'));
+
+DROP POLICY IF EXISTS "Admins can update HCP settings" ON public.hcp_settings;
+CREATE POLICY "Admins can update HCP settings" ON public.hcp_settings
+  FOR UPDATE TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role = 'admin'));

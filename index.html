@@ -3979,9 +3979,349 @@ function hcpDate(iso) {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ', ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
+// ---- Settings: defaults, merge, path helpers ----
+const HCP_DEFAULTS = {
+  destination: 'estimate',            // 'estimate' | 'option' | 'job'
+  approveOnSign: true,
+  mapping: {
+    optionName: 'Window glass replacement',
+    note: 'From FieldPricer estimate {quote_number}, quoted by {tech}.',
+    lineName: '{location} · {size} {unit_type}',
+    lineDesc: '{glass} · {grid}',
+    grouping: 'per-item',             // 'per-item' | 'single'
+    sendCost: false,
+    manualCosts: 'separate',          // 'separate' | 'combined'
+    excluded: 'omit',                 // 'omit' | 'zero'
+    jobTypeId: '',
+    leadSource: '',
+    tags: 'FieldPricer',
+    nameAs: 'person',                 // 'person' | 'company'
+  },
+  team: {},                           // FieldPricer user id -> HCP employee id ('' = unassigned)
+  rules: { sendingEnabled: false, whoCanSend: 'admins', resend: 'update' },
+};
+function hcpSettings(src) {
+  const s = src || app.hcp?.settings || {};
+  return {
+    ...HCP_DEFAULTS, ...s,
+    mapping: { ...HCP_DEFAULTS.mapping, ...(s.mapping || {}) },
+    team: { ...(s.team || {}) },
+    rules: { ...HCP_DEFAULTS.rules, ...(s.rules || {}) },
+  };
+}
+function hcpGetPath(obj, path) { return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj); }
+function hcpSetPath(obj, path, val) {
+  const ks = path.split('.'); let o = obj;
+  ks.slice(0, -1).forEach(k => { o[k] = o[k] || {}; o = o[k]; });
+  o[ks[ks.length - 1]] = val;
+}
+
+// ---- Field mapping: template values and line building ----
+const HCP_TOKENS = [
+  ['location', 'Item location'], ['size', 'Size'], ['unit_type', 'Unit type'], ['glass', 'Glass'],
+  ['grid', 'Grid'], ['quote_number', 'Estimate #'], ['customer', 'Customer'], ['tech', 'Tech'],
+];
+// Fills {tokens}; empty values are dropped along with their "·" separator,
+// so "{location} · {size}" with no location reads "36×60\"", not " · 36×60\"".
+function hcpFill(tpl, vals) {
+  const out = String(tpl || '').replace(/\{(\w+)\}/g, (_, k) => String(vals[k] ?? '').trim());
+  return out.split('·').map(x => x.trim()).filter(Boolean).join(' · ').replace(/\s{2,}/g, ' ').trim();
+}
+function hcpPaneTokens(p) {
+  const unitLabels = { single_pane: 'Single Pane', double_pane: 'Double Pane', triple_pane: 'Triple Pane' };
+  const ut = p.unitType || (p.shape === 'triple_pane' ? 'triple_pane' : 'double_pane');
+  const gm = p.grid !== undefined ? p.grid : (p.gridEnabled ? 'standard' : 'none');
+  return {
+    location: p.location || '',
+    size: p.width && p.height ? `${p.width}×${p.height}${p.unit === 'cm' ? ' cm' : '"'}` : '',
+    unit_type: unitLabels[ut] || '',
+    glass: getPaneLabel(p),
+    grid: gm === 'none' ? '' : (gm === 'custom' ? 'Custom grid' : 'Grid'),
+  };
+}
+function hcpQuoteTokens(q) {
+  return { quote_number: q.jobNum || '', customer: q.customerName || '', tech: q.techName || '' };
+}
+// What Housecall Pro receives for a quote: line items in cents that add up
+// exactly to the price the customer was quoted (same split as Customer View).
+function buildHcpLines(q, st) {
+  const m = st.mapping;
+  const supplier = q.supplier || getDefaultSupplier();
+  const finalPrice = q.agreedPrice ?? q.grandTotal ?? 0;
+  const manual = (q.manualCosts || []).filter(c => !c.excluded);
+  const manualSum = sumManualCosts(q.manualCosts);
+  const distributed = distributePrice(finalPrice - manualSum, calcItemRanges(q.panes || [], supplier));
+  const priceById = Object.fromEntries(distributed.map(x => [x.pane.id, x.price]));
+  const qt = hcpQuoteTokens(q);
+  const included = (q.panes || []).filter(p => !p.excluded);
+  const lines = [];
+  if (m.grouping === 'single') {
+    const total = included.reduce((s, p) => s + (priceById[p.id] || 0), 0);
+    lines.push({ name: hcpFill(m.optionName, qt) || 'Window glass replacement',
+      description: `${included.length} item${included.length === 1 ? '' : 's'}`, cents: Math.round(total * 100), quantity: 1 });
+  } else {
+    included.forEach(p => {
+      const t = { ...qt, ...hcpPaneTokens(p) }, qty = p.qty || 1;
+      lines.push({ name: (hcpFill(m.lineName, t) || 'Glass item') + (qty > 1 ? ` (×${qty})` : ''),
+        description: hcpFill(m.lineDesc, t), cents: Math.round((priceById[p.id] || 0) * 100), quantity: 1 });
+    });
+  }
+  if (m.manualCosts === 'combined' && manual.length) {
+    lines.push({ name: 'Additional costs', description: manual.map(c => c.name).filter(Boolean).join(', '),
+      cents: Math.round(manualSum * 100), quantity: 1 });
+  } else {
+    manual.forEach(c => lines.push({ name: c.name || 'Additional cost', description: c.description || '',
+      cents: Math.round((c.cost || 0) * 100), quantity: 1 }));
+  }
+  if (m.excluded === 'zero') {
+    (q.panes || []).filter(p => p.excluded).forEach(p => {
+      const t = { ...qt, ...hcpPaneTokens(p) };
+      lines.push({ name: (hcpFill(m.lineName, t) || 'Glass item') + ' (not included)',
+        description: 'Quoted, not part of this job', cents: 0, quantity: 1, notIncluded: true });
+    });
+  }
+  return { lines, totalCents: lines.reduce((s, l) => s + l.cents, 0), quotedCents: Math.round(finalPrice * 100) };
+}
+// The quote the mapping preview is built from: the newest non-draft quote
+// whose items price cleanly; null if there isn't one yet.
+function hcpPreviewQuote() {
+  const qs = (appData.quotes || []).filter(q => q.status !== 'draft' && (q.panes || []).some(p => !p.excluded))
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  return qs.find(q => {
+    const sup = q.supplier || getDefaultSupplier();
+    return q.panes.filter(p => !p.excluded).every(p => { const r = calcPane(p, sup); return r && !r.requiresQuote; });
+  }) || null;
+}
+function hcpMoney(cents) {
+  return '$' + (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// ---- Sub-screens ----
+function hcpSubHeader(title, sub) {
+  return `
+  <button class="btn btn-ghost btn-sm mb-12" id="hcp-view-back">← Housecall Pro</button>
+  <div style="font-family:var(--font-semi);font-weight:700;font-size:20px;margin-bottom:4px;">${title}</div>
+  ${sub ? `<p style="font-size:14px;color:var(--text-2);margin:0 0 14px;">${sub}</p>` : ''}`;
+}
+function hcpSubFooter() {
+  const busy = app.hcp.busy === 'save';
+  return `
+  ${app.hcp.saveError ? `<p class="login-error" style="display:block;">${hcpEsc(app.hcp.saveError)}</p>` : ''}
+  <div style="display:flex;gap:8px;margin-top:16px;">
+    <button class="btn btn-secondary" id="hcp-view-back-2" style="flex:1;" ${busy ? 'disabled' : ''}>Cancel</button>
+    <button class="btn btn-primary" id="hcp-save" style="flex:2;" ${busy ? 'disabled' : ''}>${busy ? 'Saving…' : 'Save'}</button>
+  </div>`;
+}
+function hcpChoice(path, val, cur, title, sub, disabled) {
+  const on = cur === val;
+  return `
+  <div class="card card-tight mb-8" ${disabled ? '' : `data-hcp-set="${path}" data-val="${val}"`}
+    style="cursor:${disabled ? 'not-allowed' : 'pointer'};${on ? 'border-color:var(--amber);background:var(--amber-bg);' : ''}${disabled ? 'opacity:0.45;' : ''}display:flex;gap:12px;align-items:flex-start;">
+    <div style="width:18px;height:18px;border-radius:50%;border:2px solid ${on ? 'var(--amber)' : 'var(--border-0)'};flex-shrink:0;margin-top:3px;display:flex;align-items:center;justify-content:center;">
+      ${on ? '<div style="width:8px;height:8px;border-radius:50%;background:var(--amber);"></div>' : ''}</div>
+    <div><div style="font-weight:600;font-size:15px;">${title}</div><div style="font-size:13px;color:var(--text-2);">${sub}</div></div>
+  </div>`;
+}
+function hcpChips(path, cur, opts) {
+  return `<div class="chip-group mb-8">${opts.map(([v, label]) =>
+    `<div class="chip ${cur === v ? 'active' : ''}" data-hcp-set="${path}" data-val="${v}">${label}</div>`).join('')}</div>`;
+}
+function hcpToggle(path, on, label, sub) {
+  const id = 'hcp-chk-' + path.replace(/\W/g, '-');
+  return `
+  <div class="flex-between gap-12 mb-8">
+    <div><div style="font-weight:600;font-size:15px;">${label}</div>${sub ? `<div style="font-size:13px;color:var(--text-2);">${sub}</div>` : ''}</div>
+    <label class="toggle-switch" style="flex-shrink:0;"><input type="checkbox" id="${id}" data-hcp-check="${path}" ${on ? 'checked' : ''} /><span class="toggle-slider"></span></label>
+  </div>`;
+}
+
+function renderHcpDest() {
+  const d = app.hcp.draft;
+  return `
+  ${hcpSubHeader('Where quotes go', 'When someone presses Send to HCP on a quote, FieldPricer creates this in Housecall Pro. It never changes work that\'s already there.')}
+  ${hcpChoice('destination', 'estimate', d.destination, 'New estimate <span class="badge badge-shown" style="margin-left:6px;">Default</span>', 'One estimate per quote, for the quote\'s customer and address.')}
+  ${hcpChoice('destination', 'option', d.destination, 'New option on an existing estimate', 'The tech picks an open HCP estimate during customer lookup; the quote is added to it as another option. Falls back to a new estimate if none was picked.')}
+  ${hcpChoice('destination', 'job', d.destination, 'New job', 'Skips the estimate. The customer must already be in Housecall Pro, so the quote has to be linked during lookup.')}
+  ${hcpChoice('destination', 'lead', d.destination, 'Lead', 'Coming later.', true)}
+  ${d.destination !== 'job' ? `
+  <div class="card mt-12">
+    ${hcpToggle('approveOnSign', d.approveOnSign, 'Approve in HCP when the customer signs', 'If the quote is Approved in FieldPricer, also mark it approved in Housecall Pro and attach the signature.')}
+    <div style="font-size:13px;color:var(--text-2);">If "Automatically copy an approved estimate to a new job" is on in your Housecall Pro settings, HCP then creates the job itself. FieldPricer never creates a second one.</div>
+  </div>` : ''}
+  ${hcpSubFooter()}`;
+}
+
+function renderHcpMapping() {
+  const d = app.hcp.draft, m = d.mapping, ref = app.hcp.ref;
+  const field = (label, hcpField, path, required, placeholder) => `
+    <div class="form-group mb-12">
+      <div class="flex-between"><label class="form-label" for="hcp-in-${path.replace(/\W/g, '-')}">${label}</label>${required ? '<span style="font-size:11px;color:var(--amber);font-family:var(--font-title);letter-spacing:1px;">REQUIRED</span>' : ''}</div>
+      <input class="form-input" id="hcp-in-${path.replace(/\W/g, '-')}" data-hcp-text="${path}" value="${hcpEsc(hcpGetPath(d, path))}" placeholder="${hcpEsc(placeholder || '')}" autocomplete="off" />
+      <div style="font-size:11px;color:var(--text-3);font-family:monospace;">HCP: ${hcpField}</div>
+    </div>`;
+  const jobTypes = ref?.jobTypes?.ok ? ref.jobTypes.items : [];
+  const leadSources = ref?.leadSources?.ok ? ref.leadSources.items : [];
+  const select = (label, hcpField, path, items, emptyLabel) => `
+    <div class="form-group mb-12">
+      <label class="form-label" for="hcp-sel-${path.replace(/\W/g, '-')}">${label}</label>
+      <select class="form-input" id="hcp-sel-${path.replace(/\W/g, '-')}" data-hcp-select="${path}">
+        <option value="">${emptyLabel}</option>
+        ${items.map(([v, t]) => `<option value="${hcpEsc(v)}" ${hcpGetPath(d, path) === v ? 'selected' : ''}>${hcpEsc(t)}</option>`).join('')}
+      </select>
+      <div style="font-size:11px;color:var(--text-3);font-family:monospace;">HCP: ${hcpField}${!ref ? ' · loading your HCP lists…' : ''}</div>
+    </div>`;
+
+  const q = hcpPreviewQuote();
+  let preview;
+  if (q) {
+    const { lines, totalCents, quotedCents } = buildHcpLines(q, d);
+    preview = `
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">Built from ${hcpEsc(q.customerName || 'a recent quote')}${q.jobNum ? ' · #' + hcpEsc(q.jobNum) : ''}</div>
+      <div style="font-weight:600;margin-bottom:6px;">${hcpEsc(hcpFill(m.optionName, hcpQuoteTokens(q)) || '(no option name)')}</div>
+      ${lines.map(l => `
+        <div class="flex-between gap-12" style="padding:8px 0;border-bottom:1px solid var(--border-1);${l.notIncluded ? 'opacity:0.55;' : ''}">
+          <div style="min-width:0;"><div style="font-weight:600;font-size:14px;">${hcpEsc(l.name)}</div>${l.description ? `<div style="font-size:12px;color:var(--text-2);">${hcpEsc(l.description)}</div>` : ''}</div>
+          <div style="font-family:var(--font-title);font-weight:700;font-size:16px;white-space:nowrap;">${hcpMoney(l.cents)}</div>
+        </div>`).join('')}
+      <div class="flex-between mt-8"><span style="font-size:13px;color:var(--text-2);">Before tax · HCP adds tax</span>
+        <span style="font-family:var(--font-title);font-weight:800;font-size:20px;">${hcpMoney(totalCents)}</span></div>
+      <div style="font-size:13px;margin-top:4px;" class="${totalCents === quotedCents ? 'text-green' : 'text-red'}">${totalCents === quotedCents ? '✓ Matches the quoted price to the cent' : '✕ Doesn\'t match the quoted price (' + hcpMoney(quotedCents) + ')'}</div>`;
+  } else {
+    const t = { location: 'Kitchen', size: '36×60"', unit_type: 'Double Pane', glass: '1/4" · Double Softcoat · Temp.', grid: 'Grid', quote_number: '1042', customer: 'Dana Whitfield', tech: 'Anthony' };
+    preview = `
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">Example item (there's no sent or approved quote to preview yet)</div>
+      <div style="font-weight:600;font-size:14px;">${hcpEsc(hcpFill(m.lineName, t) || '(no line name)')}</div>
+      <div style="font-size:12px;color:var(--text-2);">${hcpEsc(hcpFill(m.lineDesc, t))}</div>`;
+  }
+
+  return `
+  ${hcpSubHeader('Field mapping', 'How a FieldPricer quote fills in Housecall Pro. The preview at the bottom updates as you edit.')}
+  <div class="card mb-12">
+    <div class="section-label mb-8">Insert a value</div>
+    <div class="chip-group">${HCP_TOKENS.map(([k, label]) => `<div class="chip" data-hcp-token="{${k}}" title="${label}" style="font-family:monospace;font-size:12px;">{${k}}</div>`).join('')}</div>
+    <div style="font-size:12px;color:var(--text-2);margin-top:8px;">Tap one to add it to the field you last typed in. Empty values are skipped.</div>
+  </div>
+
+  <div class="section-label mb-8">Estimate</div>
+  <div class="card mb-12">
+    ${field('Option name', 'options[].name', 'mapping.optionName', true)}
+    ${field('Note', 'note', 'mapping.note', false)}
+    ${select('Job type', 'estimate_fields.job_type_id', 'mapping.jobTypeId', jobTypes.map(t => [t.id, t.name]), 'None')}
+    ${select('Lead source', 'lead_source', 'mapping.leadSource', leadSources.map(t => [t.name, t.name]), 'None')}
+    ${field('Tags', 'options[].tags', 'mapping.tags', false, 'Comma separated')}
+  </div>
+
+  <div class="section-label mb-8">Customer</div>
+  <div class="card mb-12">
+    <div class="form-label mb-8">Send the customer name as</div>
+    ${hcpChips('mapping.nameAs', m.nameAs, [['person', 'First + last name'], ['company', 'Company name']])}
+    <div style="font-size:12px;color:var(--text-2);">Phone → mobile number, email → email, service address → address. Existing HCP customers are matched by phone, then email.</div>
+  </div>
+
+  <div class="section-label mb-8">Line items</div>
+  <div class="card mb-12">
+    <div class="form-label mb-8">Grouping</div>
+    ${hcpChips('mapping.grouping', m.grouping, [['per-item', 'One line per item'], ['single', 'One line for the whole quote']])}
+    ${m.grouping === 'per-item' ? field('Line name', 'line_items[].name', 'mapping.lineName', true) + field('Line description', 'line_items[].description', 'mapping.lineDesc', false) : ''}
+    <div style="font-size:13px;color:var(--text-2);margin:0 0 12px;">Price: each item's share of the quoted price, sent in cents. Always adds up exactly to the quoted total. Sent before tax; HCP adds tax.</div>
+    ${hcpToggle('mapping.sendCost', m.sendCost, 'Send FieldPricer\'s cost', 'Turns on job costing in HCP. Anyone in HCP who can see job costing will see your cost basis.')}
+    <div class="form-label mb-8 mt-12">Manual costs</div>
+    ${hcpChips('mapping.manualCosts', m.manualCosts, [['separate', 'Each on its own line'], ['combined', 'One "Additional costs" line']])}
+    <div class="form-label mb-8">Excluded items</div>
+    ${hcpChips('mapping.excluded', m.excluded, [['omit', 'Leave them out'], ['zero', 'List at $0, "not included"']])}
+  </div>
+
+  <div class="section-label mb-8">What Housecall Pro receives</div>
+  <div class="card">${preview}</div>
+  ${hcpSubFooter()}`;
+}
+
+function renderHcpTeam() {
+  const d = app.hcp.draft, ref = app.hcp.ref;
+  const emps = ref?.employees?.ok ? ref.employees.items : null;
+  const users = (app.adminUsersList || []).filter(u => u.isActive);
+  if (!emps || (!app.adminUsersList && app.adminUsersLoading) || !app.adminUsersList) {
+    return `${hcpSubHeader('Team')}<div class="card"><div style="font-size:14px;color:var(--text-2);">Loading FieldPricer users and Housecall Pro employees…</div></div>`;
+  }
+  const byEmail = e => emps.find(x => x.email && e && x.email.toLowerCase() === e.toLowerCase());
+  return `
+  ${hcpSubHeader('Team', 'Match each FieldPricer user to their Housecall Pro employee, so sent estimates are assigned to the right person. Matched by email automatically; fix any that are wrong.')}
+  ${users.map(u => {
+    const saved = Object.prototype.hasOwnProperty.call(d.team, u.id);
+    const auto = byEmail(u.email);
+    const val = saved ? d.team[u.id] : (auto?.id || '');
+    const badge = saved ? (val ? '<span class="badge badge-draft">Set by admin</span>' : '<span class="badge" style="background:var(--bg-3);color:var(--text-2);border:1px solid var(--border-0);">Unassigned</span>')
+      : (auto ? '<span class="badge badge-sent">Matched by email</span>' : '<span class="badge badge-flagged">Not matched</span>');
+    return `
+    <div class="card card-tight mb-8">
+      <div class="flex-between mb-8"><div><div style="font-weight:600;">${hcpEsc(u.name)} <span style="font-size:12px;color:var(--text-2);">· ${hcpEsc(u.role)}</span></div><div style="font-size:12px;color:var(--text-2);">${hcpEsc(u.email)}</div></div>${badge}</div>
+      <select class="form-input" id="hcp-team-${u.id}" data-hcp-team="${u.id}">
+        <option value="">Leave unassigned in HCP</option>
+        ${emps.map(e => `<option value="${hcpEsc(e.id)}" ${val === e.id ? 'selected' : ''}>${hcpEsc(e.name)}${e.email ? ' · ' + hcpEsc(e.email) : ''}</option>`).join('')}
+      </select>
+    </div>`;
+  }).join('')}
+  <div style="font-size:13px;color:var(--text-2);margin-top:4px;">Estimates from unassigned users are sent without an assigned employee; the office can assign them in HCP.</div>
+  ${hcpSubFooter()}`;
+}
+
+function renderHcpRules() {
+  const d = app.hcp.draft, mock = app.hcp.status?.mock;
+  return `
+  ${hcpSubHeader('Sending rules')}
+  <div class="section-label mb-8">Sending to Housecall Pro</div>
+  <div class="card mb-12">
+    ${mock
+      ? `<div style="font-weight:600;font-size:15px;">Mock key: sends are simulated</div>
+         <div style="font-size:13px;color:var(--text-2);">With the test key, Send to HCP always works but nothing reaches Housecall Pro. With a real key, sending starts switched off.</div>`
+      : `${hcpToggle('rules.sendingEnabled', d.rules.sendingEnabled, 'Allow sending quotes to Housecall Pro',
+          d.rules.sendingEnabled ? 'On. While testing, only customers whose name starts with ZZ TEST can be created or changed.' : 'Off. FieldPricer only reads from Housecall Pro (customer lookup and your HCP lists). Nothing is created or changed there.')}`}
+  </div>
+  <div class="section-label mb-8">Who can press Send to HCP</div>
+  ${hcpChoice('rules.whoCanSend', 'admins', d.rules.whoCanSend, 'Admins only', 'Techs can still look up HCP customers while quoting.')}
+  ${hcpChoice('rules.whoCanSend', 'all', d.rules.whoCanSend, 'Admins and techs', 'Techs can send their own quotes from Quote Detail.')}
+  <div class="section-label mb-8 mt-16">When an already-sent quote is edited</div>
+  ${hcpChoice('rules.resend', 'update', d.rules.resend, 'Update the HCP estimate', 'Send replaces its line items. Blocked if the estimate was already approved in HCP.')}
+  ${hcpChoice('rules.resend', 'new', d.rules.resend, 'Create a new estimate', 'The old one stays in HCP. Can leave duplicates for the office to clean up.')}
+  ${hcpChoice('rules.resend', 'block', d.rules.resend, 'Don\'t allow it', 'Once sent, changes have to be made in HCP.')}
+  <div class="section-label mb-8 mt-16">Matching customers</div>
+  <div class="card card-tight mb-12" style="font-size:14px;color:var(--text-1);">Looks for an existing HCP customer by <b>phone, then email</b>. More than one match: the sender picks. No match: the customer is created in HCP when the quote is sent.</div>
+  <div class="section-label mb-8">Automatic sending</div>
+  <div class="card card-tight" style="opacity:0.5;font-size:14px;">Send automatically when a quote reaches a chosen status. <b>Coming later</b>, once the manual workflow is settled.</div>
+  ${hcpSubFooter()}`;
+}
+
+function hcpSetupRows() {
+  const st = hcpSettings(), status = app.hcp.status || {};
+  const destLabel = { estimate: 'New estimate in HCP', option: 'New option on an existing estimate', job: 'New job in HCP' }[st.destination] || 'New estimate in HCP';
+  const users = (app.adminUsersList || []).filter(u => u.isActive);
+  const emps = app.hcp.ref?.employees?.ok ? app.hcp.ref.employees.items : [];
+  const matched = users.filter(u => Object.prototype.hasOwnProperty.call(st.team, u.id) ? !!st.team[u.id]
+    : emps.some(e => e.email && u.email && e.email.toLowerCase() === u.email.toLowerCase())).length;
+  const teamLabel = app.adminUsersList ? `${matched} of ${users.length} users matched` : 'Match FieldPricer users to HCP employees';
+  const sendLabel = status.mock ? 'Mock key · sends are simulated'
+    : (st.rules.sendingEnabled ? '<span class="text-green">Sending on</span> · ZZ TEST customers only' : '<span style="color:var(--orange);">Read-only</span> · sending is off');
+  const row = (view, title, sub, disabled) => `
+    <div class="card card-tight mb-8 flex-between gap-12" ${disabled ? 'style="opacity:0.5;"' : `data-hcp-view="${view}" style="cursor:pointer;"`}>
+      <div style="min-width:0;"><div style="font-weight:600;font-size:15px;">${title}</div><div style="font-size:13px;color:var(--text-2);">${sub}</div></div>
+      ${disabled ? '' : '<span style="color:var(--text-3);font-size:20px;">›</span>'}
+    </div>`;
+  return `
+  <div class="section-label mb-8 mt-16">Setup</div>
+  ${row('dest', 'Where quotes go', destLabel)}
+  ${row('map', 'Field mapping', st.mapping.grouping === 'per-item' ? 'One line per item' : 'One line for the whole quote')}
+  ${row('team', 'Team', teamLabel)}
+  ${row('rules', 'Sending rules', sendLabel + ' · ' + (st.rules.whoCanSend === 'all' ? 'admins and techs' : 'admins only'))}
+  <div class="section-label mb-8 mt-16">Activity</div>
+  ${row('log', 'Sync log', 'Every send to Housecall Pro will be listed here once Send to HCP is added.', true)}`;
+}
+
 function renderAdminIntegrations() {
   if (!app.hcp) { app.hcp = {}; setTimeout(loadHcpStatus, 0); }
   const h = app.hcp;
+  if (h.view && h.draft && h.status?.connected) {
+    return `<div>${{ dest: renderHcpDest, map: renderHcpMapping, team: renderHcpTeam, rules: renderHcpRules }[h.view]()}</div>`;
+  }
   if (h.loading && !h.status) {
     return `<div class="empty-state"><div class="empty-icon">🔌</div><div class="empty-title">Checking Housecall Pro…</div></div>`;
   }
@@ -4078,13 +4418,10 @@ function renderAdminIntegrations() {
     </div>
   </div>
 
-  ${renderHcpReference()}
+  ${h.notice2 ? `<div class="card card-tight mb-12" style="border-color:var(--green);font-size:14px;">${hcpEsc(h.notice2)}</div>` : ''}
+  ${hcpSetupRows()}
 
-  <div class="section-label mb-8 mt-16">Coming next</div>
-  <div class="card card-tight" style="opacity:0.6;font-size:14px;line-height:1.9;">
-    <div>Where quotes go · Field mapping · Team · Sending rules · Sync log</div>
-    <div style="font-size:12px;color:var(--text-2);line-height:1.4;">Set up in the next phase, once the connection is confirmed with your real Housecall Pro account.</div>
-  </div>
+  ${renderHcpReference()}
 </div>`;
 }
 
@@ -5305,6 +5642,53 @@ function attachEvents() {
   on('hcp-test', 'click', () => hcpRun('test', 'test'));
   on('hcp-disconnect-confirm', 'click', () => hcpRun('disconnect', 'disconnect'));
   on('hcp-ref-refresh', 'click', () => loadHcpReference());
+  delegate('[data-hcp-view]', 'click', e => {
+    const v = e.currentTarget.dataset.hcpView;
+    app.hcp.view = v;
+    app.hcp.draft = JSON.parse(JSON.stringify(hcpSettings()));
+    app.hcp.saveError = null; app.hcp.notice = null; app.hcp.notice2 = null;
+    app.hcp.lastField = 'mapping.lineName';
+    if ((v === 'map' || v === 'team') && !app.hcp.ref && !app.hcp.refLoading) loadHcpReference();
+    if (v === 'team' && !app.adminUsersList && !app.adminUsersLoading) loadAdminUsers();
+    render();
+    document.querySelector('.scroll-content')?.scrollTo(0, 0);
+  });
+  const hcpLeave = () => { app.hcp.view = null; app.hcp.draft = null; app.hcp.saveError = null; render(); document.querySelector('.scroll-content')?.scrollTo(0, 0); };
+  on('hcp-view-back', 'click', hcpLeave);
+  on('hcp-view-back-2', 'click', hcpLeave);
+  on('hcp-save', 'click', () => saveHcpSettings());
+  delegate('[data-hcp-set]', 'click', e => {
+    hcpSetPath(app.hcp.draft, e.currentTarget.dataset.hcpSet, e.currentTarget.dataset.val);
+    render();
+  });
+  delegate('[data-hcp-check]', 'change', e => {
+    hcpSetPath(app.hcp.draft, e.currentTarget.dataset.hcpCheck, e.currentTarget.checked);
+    render();
+  });
+  delegate('[data-hcp-select]', 'change', e => {
+    hcpSetPath(app.hcp.draft, e.currentTarget.dataset.hcpSelect, e.currentTarget.value);
+    render();
+  });
+  delegate('[data-hcp-team]', 'change', e => {
+    app.hcp.draft.team[e.currentTarget.dataset.hcpTeam] = e.currentTarget.value;
+    render();
+  });
+  // Text fields re-render so the preview updates live; restore focus + cursor afterwards.
+  delegate('[data-hcp-text]', 'input', e => {
+    const el = e.currentTarget, id = el.id, pos = el.selectionStart;
+    hcpSetPath(app.hcp.draft, el.dataset.hcpText, el.value);
+    app.hcp.lastField = el.dataset.hcpText;
+    render();
+    const n = document.getElementById(id);
+    if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (_) {} }
+  });
+  delegate('[data-hcp-text]', 'focus', e => { app.hcp.lastField = e.currentTarget.dataset.hcpText; });
+  delegate('[data-hcp-token]', 'click', e => {
+    const path = app.hcp.lastField || 'mapping.lineName';
+    const cur = hcpGetPath(app.hcp.draft, path) || '';
+    hcpSetPath(app.hcp.draft, path, (cur + ' ' + e.currentTarget.dataset.hcpToken).trim());
+    render();
+  });
 
   // ---- ADMIN: USERS ----
   on('admin-users-refresh', 'click', () => loadAdminUsers());
@@ -5818,6 +6202,47 @@ async function callHcp(action, extra = {}) {
   return result;
 }
 
+async function loadHcpSettings() {
+  const { data, error } = await sb.from('hcp_settings').select('settings').eq('id', 1).maybeSingle();
+  if (error) throw new Error('Couldn\'t load integration settings: ' + error.message);
+  app.hcp.settings = data?.settings || {};
+}
+
+async function saveHcpSettings() {
+  if (app.hcp.busy) return;
+  const draft = app.hcp.draft;
+  if (!String(draft.mapping.optionName || '').trim()) { app.hcp.saveError = 'Option name is required by Housecall Pro.'; render(); return; }
+  if (draft.mapping.grouping === 'per-item' && !String(draft.mapping.lineName || '').trim()) { app.hcp.saveError = 'Line name is required by Housecall Pro.'; render(); return; }
+  app.hcp.busy = 'save';
+  app.hcp.saveError = null;
+  render();
+  try {
+    // Team: store the resolved choice for every user shown, so auto-matches become explicit.
+    if (app.hcp.view === 'team') {
+      const emps = app.hcp.ref?.employees?.ok ? app.hcp.ref.employees.items : [];
+      (app.adminUsersList || []).filter(u => u.isActive).forEach(u => {
+        if (!Object.prototype.hasOwnProperty.call(draft.team, u.id)) {
+          const m = emps.find(x => x.email && u.email && x.email.toLowerCase() === u.email.toLowerCase());
+          draft.team[u.id] = m?.id || '';
+        }
+      });
+    }
+    const { error } = await sb.from('hcp_settings').upsert({
+      id: 1, settings: draft, updated_by: app.currentUser.id, updated_at: new Date().toISOString(),
+    });
+    if (error) throw new Error(error.message);
+    app.hcp.settings = draft;
+    const title = { dest: 'Where quotes go', map: 'Field mapping', team: 'Team', rules: 'Sending rules' }[app.hcp.view];
+    app.hcp.view = null; app.hcp.draft = null;
+    app.hcp.notice2 = `${title} saved.`;
+  } catch (e) {
+    app.hcp.saveError = 'Couldn\'t save: ' + e.message;
+  } finally {
+    app.hcp.busy = null;
+    render();
+  }
+}
+
 async function loadHcpStatus() {
   app.hcp = app.hcp || {};
   if (app.hcp.loading) return;
@@ -5825,6 +6250,7 @@ async function loadHcpStatus() {
   app.hcp.error = null;
   render();
   try {
+    await loadHcpSettings();
     app.hcp.status = await callHcp('status');
   } catch (e) {
     app.hcp.error = e.message;
@@ -5833,6 +6259,7 @@ async function loadHcpStatus() {
     render();
   }
   if (app.hcp.status?.connected && !app.hcp.ref) loadHcpReference();
+  if (app.hcp.status?.connected && !app.adminUsersList && !app.adminUsersLoading) loadAdminUsers();
 }
 
 async function loadHcpReference() {
@@ -5858,6 +6285,7 @@ async function hcpConnect(apiKey) {
   render();
   try {
     app.hcp.status = await callHcp('connect', { apiKey });
+    await loadHcpSettings().catch(() => {});
     app.hcp.mode = null;
     app.hcp.ref = null;
     app.hcp.notice = `Connected to ${app.hcp.status.companyName || 'Housecall Pro'}.`;

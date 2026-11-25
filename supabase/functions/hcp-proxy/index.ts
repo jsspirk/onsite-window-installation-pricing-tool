@@ -175,6 +175,14 @@ Deno.serve(async (req) => {
           last_error: null,
         });
         if (upErr) return json({ error: 'Could not save the connection: ' + upErr.message }, 500);
+        // A real key always starts read-only: sending stays off until an admin
+        // turns it on in Sending rules. (Mock keys only ever simulate sends.)
+        if (!isMockKey(apiKey)) {
+          const { data: cur } = await admin.from('hcp_settings').select('settings').eq('id', 1).maybeSingle();
+          const settings = cur?.settings || {};
+          settings.rules = { ...(settings.rules || {}), sendingEnabled: false };
+          await admin.from('hcp_settings').upsert({ id: 1, settings, updated_by: user.id, updated_at: now });
+        }
         return json(await readStatus());
       }
 
