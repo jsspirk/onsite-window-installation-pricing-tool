@@ -1601,6 +1601,7 @@ function calcPane(pane, supplier) {
     productCost,
     laborCost:     laborTotal,
     materialsCost: 0,
+    supplierGlassCost: +(glassCost * qty).toFixed(2), // what FastGlass pays for the glass, before its own markup
     lineTotal,
     roundedTotal:  roundToIncrement(lineTotal, appConfig.round_increment || 25),
     requiresQuote: false,
@@ -1779,6 +1780,7 @@ function normalizeQuote(row) {
     customerContact: row.customer_contact,
     customerDetails: row.customer_details ?? undefined,
     hcpLink:         row.hcp_link ?? undefined,
+    hcpSync:         row.hcp_sync ?? undefined,
     contactType:     row.contact_type,
     jobDate:         row.job_date,
     jobNum:          row.job_num,
@@ -3638,7 +3640,8 @@ function renderQuoteDetail() {
         ${d.hcpLink?.customerId ? hcpLinkSummary(d.hcpLink, d.customerDetails)
           : app.hcpAvail?.connected ? `<button class="btn btn-ghost btn-sm" id="link-hcp-open" ${isLocked ? 'disabled' : ''}>Link to HCP customer</button>`
           : ''}
-      </div>` : ''}
+      </div>
+      ${renderHcpSendBlock(d, isAdmin)}` : ''}
     </div>
 
     ${isLocked ? `
@@ -3750,6 +3753,7 @@ function renderQuoteDetail() {
   ${app.manualCostModal ? renderManualCostModal() : ''}
   ${app.statusSheetOpen && isAdmin ? renderStatusSheet() : ''}
   ${app.lkModal ? renderLinkHcpModal() : ''}
+  ${app.hcpSend ? renderHcpSendSheet() : ''}
 </div>`;
 }
 
@@ -3816,6 +3820,7 @@ function openAdminQuote(quoteId) {
     customerContact: q.customerContact || '',
     customerDetails: q.customerDetails ? { ...q.customerDetails } : undefined,
     hcpLink:         q.hcpLink ? { ...q.hcpLink } : undefined,
+    hcpSync:         q.hcpSync ? { ...q.hcpSync } : undefined,
     contactType:     q.contactType || 'phone',
     jobDate:         q.jobDate,
     jobNum:          q.jobNum || '',
@@ -4014,6 +4019,8 @@ async function ensureHcpAvail(force) {
   try {
     const r = await callHcp('available');
     app.hcpAvail = { connected: !!r.connected, mock: !!r.mock, checkedAt: Date.now() };
+    const { data: srow } = await sb.from('hcp_settings').select('settings').eq('id', 1).maybeSingle();
+    app.hcpSet = hcpSettings(srow?.settings || {});
   } catch (_) {
     app.hcpAvail = { connected: false, unreachable: true, checkedAt: Date.now() };
   } finally {
@@ -4123,6 +4130,94 @@ function renderLinkHcpModal() {
 </div>`;
 }
 
+// ---- Send to HCP (Quote Detail) ----
+function hcpSendState(d, isAdmin) {
+  const set = app.hcpSet || hcpSettings({});
+  const avail = app.hcpAvail || {};
+  if (!avail.connected) return { show: false };
+  if (!isAdmin && set.rules.whoCanSend !== 'all') return { show: false };
+  if (d.status === 'draft') return { show: true, blocked: 'Finish the quote before sending it to Housecall Pro.' };
+  if (d.agreedPrice === null || d.agreedPrice === undefined) return { show: true, blocked: 'Pick the price you\'re quoting first (Show Customer), then send.' };
+  if (!avail.mock && !set.rules.sendingEnabled) return { show: true, blocked: 'Sending to Housecall Pro is switched off (read-only). An admin can turn it on in Admin › Integrations › Sending rules.' };
+  return { show: true, set };
+}
+function renderHcpSendBlock(d, isAdmin) {
+  const ss = hcpSendState(d, isAdmin);
+  if (!ss.show) return '';
+  const sync = d.hcpSync;
+  const set = app.hcpSet || hcpSettings({});
+  if (sync && (sync.estimateId || sync.jobId)) {
+    const action = set.rules.resend === 'update' && sync.kind !== 'job' ? 'Update in HCP' : set.rules.resend === 'new' ? 'Send again as new' : '';
+    return `
+    <div class="card card-tight mt-8" style="border-color:var(--green);">
+      <div class="flex-between gap-8">
+        <div><div style="font-weight:700;font-size:15px;">Sent to Housecall Pro</div>
+          <div style="font-size:13px;color:var(--text-1);">${hcpEsc(sync.label)}${sync.approved ? ' · approved' : ''}${sync.mock ? ' · <span style="color:var(--orange);">simulated</span>' : ''}</div>
+          <div style="font-size:12px;color:var(--text-2);">${hcpEsc(hcpDate(sync.updatedAt || sync.sentAt))}${sync.customerName ? ' · ' + hcpEsc(sync.customerName) : ''}</div></div>
+        ${action && !ss.blocked ? `<button class="btn btn-secondary btn-sm" id="hcp-send-open">${action}</button>` : ''}
+      </div>
+      ${!action ? '<div style="font-size:12px;color:var(--text-2);margin-top:4px;">Your Sending rules say changes are made in Housecall Pro.</div>' : ''}
+    </div>`;
+  }
+  if (ss.blocked) return `<div class="card card-tight mt-8" style="font-size:13px;color:var(--text-2);"><b style="color:var(--text-1);">Send to Housecall Pro:</b> ${hcpEsc(ss.blocked)}</div>`;
+  return `<button class="btn btn-primary btn-full mt-8" id="hcp-send-open">Send to Housecall Pro</button>`;
+}
+function renderHcpSendSheet() {
+  const d = app.draft, hs = app.hcpSend, set = app.hcpSet || hcpSettings({});
+  const mock = !!app.hcpAvail?.mock;
+  const update = d.hcpSync && set.rules.resend === 'update' && d.hcpSync.kind !== 'job';
+  const destLabel = update ? `Update ${d.hcpSync.label}` : ({ estimate: 'New estimate', option: d.hcpLink?.workKind === 'Estimate' ? `New option on Estimate #${d.hcpLink.workNumber}` : 'New estimate (no existing estimate was picked)', job: 'New job' }[set.destination] || 'New estimate');
+  const isUpdate = hs.result ? hs.result.mode === 'update' : update;
+  const head = `<div class="modal-handle"></div><div style="font-family:var(--font-title);font-weight:800;font-size:22px;margin-bottom:4px;">${isUpdate ? 'Update in Housecall Pro' : 'Send to Housecall Pro'}</div>`;
+
+  if (hs.result) {
+    return `<div class="modal-overlay" id="hcp-send-overlay"><div class="modal-sheet">${head}
+      <div class="card card-tight mb-12" style="border-color:var(--green);background:var(--green-bg);">
+        <div style="font-weight:700;font-size:16px;">${hs.result.mode === 'update' ? 'Updated' : 'Sent'}: ${hcpEsc(hs.result.sync.label)}</div>
+        ${hs.result.sync.mock ? '<div style="font-size:13px;color:var(--orange);">Simulated with the test key. Nothing reached Housecall Pro.</div>' : '<div style="font-size:13px;color:var(--text-1);">Open Housecall Pro to see it.</div>'}
+      </div>
+      <div class="form-label mb-8">What happened</div>
+      <ol style="margin:0 0 14px;padding-left:20px;font-size:14px;line-height:1.6;color:var(--text-1);">${hs.result.steps.map(x => `<li>${hcpEsc(x)}</li>`).join('')}</ol>
+      <button class="btn btn-primary btn-full" id="hcp-send-close">Done</button>
+    </div></div>`;
+  }
+
+  const { lines, totalCents, quotedCents } = buildHcpLines(d, set);
+  const cd = d.customerDetails || {};
+  let custHtml;
+  if (hs.choices) {
+    custHtml = `<div style="font-size:13px;color:var(--text-1);margin-bottom:8px;">More than one Housecall Pro customer matches. Which one is it?</div>
+      ${hs.choices.map((c, i) => `<button class="btn btn-secondary btn-full mb-8" data-hcp-choose="${i}" style="justify-content:space-between;text-transform:none;font-family:var(--font-body);letter-spacing:0;min-height:48px;"><span style="text-align:left;"><b>${hcpEsc(c.name)}</b><br><span style="font-size:12px;color:var(--text-2);font-weight:500;">${hcpEsc([c.phone, c.email].filter(Boolean).join(' · '))}</span></span></button>`).join('')}
+      <button class="btn btn-ghost btn-full" data-hcp-choose="new" style="text-transform:none;font-family:var(--font-body);letter-spacing:0;">None of these: create a new customer</button>`;
+  } else if (update) {
+    custHtml = `<div style="font-size:14px;">${hcpEsc(d.hcpSync.customerName || d.customerName)}</div>`;
+  } else if (d.hcpLink?.customerId) {
+    custHtml = `<div style="font-size:14px;"><b>${hcpEsc(d.hcpLink.customerName)}</b> · linked during lookup</div>`;
+  } else {
+    custHtml = `<div style="font-size:14px;"><b>${hcpEsc(d.customerName || 'No name')}</b></div><div style="font-size:13px;color:var(--text-2);">${cd.phone || cd.email ? 'Looks for an existing HCP customer by ' + (cd.phone ? 'phone' : 'email') + '; creates one if there\'s no match.' : 'No phone or email on the quote, so a new HCP customer is created.'}</div>`;
+  }
+  const approving = !update && d.status === 'approved' && set.approveOnSign && set.destination !== 'job';
+  return `<div class="modal-overlay" id="hcp-send-overlay"><div class="modal-sheet">${head}
+    <div style="font-size:13px;color:var(--text-2);margin-bottom:12px;">${hcpEsc(destLabel)}${!update ? ' · "' + hcpEsc(hcpFill(set.mapping.optionName, hcpQuoteTokens(d))) + '"' : ''}</div>
+    ${mock ? '<div class="card card-tight mb-12" style="border-color:var(--orange);font-size:13px;"><b>Test key:</b> this is simulated. Nothing reaches Housecall Pro.</div>'
+           : '<div class="card card-tight mb-12" style="border-color:var(--orange);font-size:13px;"><b>Testing safeguard:</b> only customers whose name starts with "ZZ TEST" can be written to. Nothing is sent to the customer.</div>'}
+    <div class="form-label mb-8">Customer</div>
+    <div class="card card-tight mb-12">${custHtml}${hcpDetailsAddrLine(cd) && !update ? `<div style="font-size:13px;color:var(--text-1);margin-top:4px;">${hcpEsc(hcpDetailsAddrLine(cd))}</div>` : ''}</div>
+    <div class="form-label mb-8">Line items</div>
+    <div class="card card-tight mb-12">
+      ${lines.map(l => `<div class="flex-between gap-12" style="padding:6px 0;border-bottom:1px solid var(--border-1);"><div style="min-width:0;"><div style="font-weight:600;font-size:14px;">${hcpEsc(l.name)}</div>${l.description ? `<div style="font-size:12px;color:var(--text-2);">${hcpEsc(l.description)}</div>` : ''}</div><div style="text-align:right;"><div style="font-family:var(--font-title);font-weight:700;">${hcpMoney(l.cents)}</div>${l.costCents !== undefined ? `<div style="font-size:11px;color:var(--text-2);">cost ${hcpMoney(l.costCents)}</div>` : ''}</div></div>`).join('')}
+      <div class="flex-between mt-8"><span style="font-size:12px;color:var(--text-2);">Before tax · HCP adds tax</span><span style="font-family:var(--font-title);font-weight:800;font-size:20px;">${hcpMoney(totalCents)}</span></div>
+      <div style="font-size:12px;" class="${totalCents === quotedCents ? 'text-green' : 'text-red'}">${totalCents === quotedCents ? '✓ Matches the quoted price to the cent' : '✕ Doesn\'t match the quoted price'}</div>
+    </div>
+    ${approving ? `<div class="card card-tight mb-12" style="font-size:13px;"><b>The customer signed this quote.</b> It will also be marked approved in Housecall Pro${d.signatureUrl ? ' and the signature attached' : ''}. If "Automatically copy an approved estimate to a new job" is on in HCP, HCP will create the job.</div>` : ''}
+    ${hs.error ? `<p class="login-error" style="display:block;">${hcpEsc(hs.error)}</p>` : ''}
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" id="hcp-send-cancel" style="flex:1;" ${hs.busy ? 'disabled' : ''}>Cancel</button>
+      ${hs.choices ? '' : `<button class="btn btn-primary" id="hcp-send-go" style="flex:2;" ${hs.busy || totalCents !== quotedCents ? 'disabled' : ''}>${hs.busy ? (update ? 'Updating…' : 'Sending…') : (update ? 'Update' : 'Send')}</button>`}
+    </div>
+  </div></div>`;
+}
+
 // ---- Settings: defaults, merge, path helpers ----
 const HCP_DEFAULTS = {
   destination: 'estimate',            // 'estimate' | 'option' | 'job'
@@ -4201,13 +4296,17 @@ function buildHcpLines(q, st) {
   const lines = [];
   if (m.grouping === 'single') {
     const total = included.reduce((s, p) => s + (priceById[p.id] || 0), 0);
-    lines.push({ name: hcpFill(m.optionName, qt) || 'Window glass replacement',
-      description: `${included.length} item${included.length === 1 ? '' : 's'}`, cents: Math.round(total * 100), quantity: 1 });
+    const line = { name: hcpFill(m.optionName, qt) || 'Window glass replacement',
+      description: `${included.length} item${included.length === 1 ? '' : 's'}`, cents: Math.round(total * 100), quantity: 1 };
+    if (m.sendCost) line.costCents = included.reduce((s, p) => s + hcpPaneCostCents(p, supplier), 0);
+    lines.push(line);
   } else {
     included.forEach(p => {
       const t = { ...qt, ...hcpPaneTokens(p) }, qty = p.qty || 1;
-      lines.push({ name: (hcpFill(m.lineName, t) || 'Glass item') + (qty > 1 ? ` (×${qty})` : ''),
-        description: hcpFill(m.lineDesc, t), cents: Math.round((priceById[p.id] || 0) * 100), quantity: 1 });
+      const line = { name: (hcpFill(m.lineName, t) || 'Glass item') + (qty > 1 ? ` (×${qty})` : ''),
+        description: hcpFill(m.lineDesc, t), cents: Math.round((priceById[p.id] || 0) * 100), quantity: 1 };
+      if (m.sendCost) line.costCents = hcpPaneCostCents(p, supplier);
+      lines.push(line);
     });
   }
   if (m.manualCosts === 'combined' && manual.length) {
@@ -4225,6 +4324,13 @@ function buildHcpLines(q, st) {
     });
   }
   return { lines, totalCents: lines.reduce((s, l) => s + l.cents, 0), quotedCents: Math.round(finalPrice * 100) };
+}
+// Job-costing value sent to HCP when 'Send FieldPricer's cost' is on:
+// supplier glass cost (before FastGlass's markup) + labor at the crew rate.
+function hcpPaneCostCents(p, supplier) {
+  const r = calcPane(p, supplier);
+  if (!r || r.requiresQuote) return 0;
+  return Math.round(((r.supplierGlassCost || 0) + (r.laborCost || 0)) * 100);
 }
 // The quote the mapping preview is built from: the newest non-draft quote
 // whose items price cleanly; null if there isn't one yet.
@@ -4325,7 +4431,7 @@ function renderHcpMapping() {
       ${lines.map(l => `
         <div class="flex-between gap-12" style="padding:8px 0;border-bottom:1px solid var(--border-1);${l.notIncluded ? 'opacity:0.55;' : ''}">
           <div style="min-width:0;"><div style="font-weight:600;font-size:14px;">${hcpEsc(l.name)}</div>${l.description ? `<div style="font-size:12px;color:var(--text-2);">${hcpEsc(l.description)}</div>` : ''}</div>
-          <div style="font-family:var(--font-title);font-weight:700;font-size:16px;white-space:nowrap;">${hcpMoney(l.cents)}</div>
+          <div style="text-align:right;"><div style="font-family:var(--font-title);font-weight:700;font-size:16px;white-space:nowrap;">${hcpMoney(l.cents)}</div>${l.costCents !== undefined ? `<div style="font-size:11px;color:var(--text-2);white-space:nowrap;">cost ${hcpMoney(l.costCents)}</div>` : ''}</div>
         </div>`).join('')}
       <div class="flex-between mt-8"><span style="font-size:13px;color:var(--text-2);">Before tax · HCP adds tax</span>
         <span style="font-family:var(--font-title);font-weight:800;font-size:20px;">${hcpMoney(totalCents)}</span></div>
@@ -4368,7 +4474,7 @@ function renderHcpMapping() {
     ${hcpChips('mapping.grouping', m.grouping, [['per-item', 'One line per item'], ['single', 'One line for the whole quote']])}
     ${m.grouping === 'per-item' ? field('Line name', 'line_items[].name', 'mapping.lineName', true) + field('Line description', 'line_items[].description', 'mapping.lineDesc', false) : ''}
     <div style="font-size:13px;color:var(--text-2);margin:0 0 12px;">Price: each item's share of the quoted price, sent in cents. Always adds up exactly to the quoted total. Sent before tax; HCP adds tax.</div>
-    ${hcpToggle('mapping.sendCost', m.sendCost, 'Send FieldPricer\'s cost', 'Turns on job costing in HCP. Anyone in HCP who can see job costing will see your cost basis.')}
+    ${hcpToggle('mapping.sendCost', m.sendCost, 'Send FieldPricer\'s cost', 'Turns on job costing in HCP. Cost = supplier glass cost before your markup + labor at the crew rate (FieldPricer doesn\'t know actual wages, so labor shows no profit). Anyone in HCP who can see job costing will see it.')}
     <div class="form-label mb-8 mt-12">Manual costs</div>
     ${hcpChips('mapping.manualCosts', m.manualCosts, [['separate', 'Each on its own line'], ['combined', 'One "Additional costs" line']])}
     <div class="form-label mb-8">Excluded items</div>
@@ -4435,6 +4541,34 @@ function renderHcpRules() {
   ${hcpSubFooter()}`;
 }
 
+function renderHcpLog() {
+  const h = app.hcp;
+  const pill = r => r === 'failed' ? '<span class="badge" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);">Failed</span>'
+    : r === 'updated' ? '<span class="badge badge-draft">Updated</span>' : '<span class="badge badge-sent">Sent</span>';
+  let body;
+  if (h.logLoading && !h.log) body = '<div class="card"><div style="font-size:14px;color:var(--text-2);">Loading…</div></div>';
+  else if (h.logError) body = `<p class="login-error" style="display:block;">${hcpEsc(h.logError)}</p>`;
+  else if (!h.log?.length) body = '<div class="card"><div style="font-size:14px;color:var(--text-2);">Nothing sent yet. Open a quote and press Send to Housecall Pro.</div></div>';
+  else body = h.log.map(l => {
+    const open = h.logOpen === l.id;
+    return `
+    <div class="card card-tight mb-8" data-hcp-log="${l.id}" style="cursor:pointer;">
+      <div class="flex-between gap-8"><div style="min-width:0;"><div style="font-weight:600;font-size:15px;">${hcpEsc(l.customer_name || 'Quote')}${l.quote_label ? ' <span style="color:var(--text-2);font-weight:400;">' + hcpEsc(l.quote_label) + '</span>' : ''}</div>
+        <div style="font-size:12px;color:var(--text-2);">${hcpEsc(l.hcp_ref || (l.action === 'update' ? 'Update' : 'Send'))} · ${hcpEsc(hcpDate(l.created_at))} · ${hcpEsc(l.sent_by_name || '')}${l.mock ? ' · simulated' : ''}</div></div>${pill(l.result)}</div>
+      ${open ? `
+      <div style="margin-top:10px;font-size:13px;line-height:1.6;color:var(--text-1);">
+        ${l.error ? `<div class="login-error" style="display:block;margin-bottom:8px;"><b>What went wrong:</b> ${hcpEsc(l.error)}</div>` : ''}
+        ${(l.steps || []).length ? `<ol style="margin:0 0 8px;padding-left:18px;">${l.steps.map(x => `<li>${hcpEsc(x)}</li>`).join('')}</ol>` : ''}
+        <div style="color:var(--text-2);">${l.line_count || 0} line items · ${hcpMoney(Number(l.total_cents) || 0)}</div>
+        ${l.result === 'failed' && (appData.quotes || []).some(q => q.id === l.quote_id) ? `<button class="btn btn-primary btn-sm mt-8" data-hcp-retry="${hcpEsc(l.quote_id)}">Open quote and retry</button>` : ''}
+      </div>` : ''}
+    </div>`;
+  }).join('');
+  return `${hcpSubHeader('Sync log', 'Every send to Housecall Pro, newest first. Tap one for details.')}
+    <div class="flex-between mb-8"><span></span><button class="btn btn-ghost btn-sm" id="hcp-log-refresh">↻ Refresh</button></div>
+    ${body}`;
+}
+
 function hcpSetupRows() {
   const st = hcpSettings(), status = app.hcp.status || {};
   const destLabel = { estimate: 'New estimate in HCP', option: 'New option on an existing estimate', job: 'New job in HCP' }[st.destination] || 'New estimate in HCP';
@@ -4457,14 +4591,14 @@ function hcpSetupRows() {
   ${row('team', 'Team', teamLabel)}
   ${row('rules', 'Sending rules', sendLabel + ' · ' + (st.rules.whoCanSend === 'all' ? 'admins and techs' : 'admins only'))}
   <div class="section-label mb-8 mt-16">Activity</div>
-  ${row('log', 'Sync log', 'Every send to Housecall Pro will be listed here once Send to HCP is added.', true)}`;
+  ${row('log', 'Sync log', 'Every send to Housecall Pro, newest first')}`;
 }
 
 function renderAdminIntegrations() {
   if (!app.hcp) { app.hcp = {}; setTimeout(loadHcpStatus, 0); }
   const h = app.hcp;
   if (h.view && h.draft && h.status?.connected) {
-    return `<div>${{ dest: renderHcpDest, map: renderHcpMapping, team: renderHcpTeam, rules: renderHcpRules }[h.view]()}</div>`;
+    return `<div>${{ dest: renderHcpDest, map: renderHcpMapping, team: renderHcpTeam, rules: renderHcpRules, log: renderHcpLog }[h.view]()}</div>`;
   }
   if (h.loading && !h.status) {
     return `<div class="empty-state"><div class="empty-icon">🔌</div><div class="empty-title">Checking Housecall Pro…</div></div>`;
@@ -4680,6 +4814,7 @@ function renderCustomerView(quoteId) {
       customerContact: d.customerContact,
       customerDetails: d.customerDetails,
       hcpLink:         d.hcpLink,
+      hcpSync:         d.hcpSync,
       jobDate: d.jobDate,
       panes: d.panes,
       manualCosts: d.manualCosts,
@@ -5077,6 +5212,17 @@ function attachEvents() {
     if (app.lk.q.trim().length >= 2) hcpLookupSearch(app.lk.q.trim());
   });
   on('link-hcp-cancel', 'click', () => { app.lkModal = false; app.lk = null; render(); });
+  on('hcp-send-open', 'click', () => { app.hcpSend = {}; render(); });
+  on('hcp-send-cancel', 'click', () => { if (!app.hcpSend?.busy) { app.hcpSend = null; render(); } });
+  on('hcp-send-close', 'click', () => { app.hcpSend = null; render(); });
+  on('hcp-send-overlay', 'click', e => { if (e.target.id === 'hcp-send-overlay' && !app.hcpSend?.busy) { app.hcpSend = null; render(); } });
+  on('hcp-send-go', 'click', () => hcpDoSend({}));
+  delegate('[data-hcp-choose]', 'click', e => {
+    const v = e.currentTarget.dataset.hcpChoose;
+    const choice = v === 'new' ? { createNewCustomer: true } : { customerId: app.hcpSend.choices[+v].id };
+    app.hcpSend.choices = null;
+    hcpDoSend(choice);
+  });
   on('link-hcp-overlay', 'click', e => { if (e.target.id === 'link-hcp-overlay') { app.lkModal = false; app.lk = null; render(); } });
 
   // Deferred render for price preview — fires only after the user has stopped interacting
@@ -5849,6 +5995,19 @@ function attachEvents() {
   on('hcp-test', 'click', () => hcpRun('test', 'test'));
   on('hcp-disconnect-confirm', 'click', () => hcpRun('disconnect', 'disconnect'));
   on('hcp-ref-refresh', 'click', () => loadHcpReference());
+  on('hcp-log-refresh', 'click', () => loadHcpLog());
+  delegate('[data-hcp-log]', 'click', e => {
+    if (e.target.closest('[data-hcp-retry]')) return;
+    const id = +e.currentTarget.dataset.hcpLog;
+    app.hcp.logOpen = app.hcp.logOpen === id ? null : id; render();
+  });
+  delegate('[data-hcp-retry]', 'click', e => {
+    const qid = e.currentTarget.dataset.hcpRetry;
+    app.hcp.view = null;
+    viewQuoteFromHistory(qid);
+    app.hcpSend = {};
+    render();
+  });
   delegate('[data-hcp-view]', 'click', e => {
     const v = e.currentTarget.dataset.hcpView;
     app.hcp.view = v;
@@ -5857,6 +6016,7 @@ function attachEvents() {
     app.hcp.lastField = 'mapping.lineName';
     if ((v === 'map' || v === 'team') && !app.hcp.ref && !app.hcp.refLoading) loadHcpReference();
     if (v === 'team' && !app.adminUsersList && !app.adminUsersLoading) loadAdminUsers();
+    if (v === 'log') loadHcpLog();
     render();
     document.querySelector('.scroll-content')?.scrollTo(0, 0);
   });
@@ -6093,6 +6253,7 @@ function autosaveDraft(d) {
     customerContact: d.customerContact,
     customerDetails: d.customerDetails,
     hcpLink:         d.hcpLink,
+    hcpSync:         d.hcpSync,
     contactType:     d.contactType,
     jobDate:         d.jobDate,
     jobNum:          d.jobNum || '',
@@ -6149,6 +6310,7 @@ function finalizeDraft(status, signatureDataUrl) {
     customerContact: d.customerContact,
     customerDetails: d.customerDetails,
     hcpLink:         d.hcpLink,
+    hcpSync:         d.hcpSync,
     contactType:     d.contactType,
     jobDate:         d.jobDate,
     jobNum:          d.jobNum || '',
@@ -6193,6 +6355,7 @@ function viewQuoteFromHistory(quoteId) {
     customerContact: q.customerContact || '',
     customerDetails: q.customerDetails ? { ...q.customerDetails } : undefined,
     hcpLink:         q.hcpLink ? { ...q.hcpLink } : undefined,
+    hcpSync:         q.hcpSync ? { ...q.hcpSync } : undefined,
     contactType: q.contactType || 'phone',
     jobDate: q.jobDate,
     jobNum: q.jobNum || '',
@@ -6243,6 +6406,7 @@ function updateQuoteStatus(status, opts = {}, signatureDataUrl) {
     customerContact: d.customerContact,
     customerDetails: d.customerDetails,
     hcpLink:         d.hcpLink,
+    hcpSync:         d.hcpSync,
     contactType:     d.contactType,
     jobDate:         d.jobDate,
     jobNum:          d.jobNum || '',
@@ -6529,6 +6693,46 @@ async function hcpRun(action, busyLabel) {
   } finally {
     app.hcp.busy = null;
     render();
+  }
+}
+
+async function loadHcpLog() {
+  app.hcp.logLoading = true; app.hcp.logError = null; render();
+  try {
+    const { data, error } = await sb.from('hcp_sync_log').select('*').order('created_at', { ascending: false }).limit(50);
+    if (error) throw new Error(error.message);
+    app.hcp.log = data || [];
+  } catch (e) {
+    app.hcp.logError = "Couldn't load the sync log: " + e.message;
+  } finally {
+    app.hcp.logLoading = false; render();
+  }
+}
+async function hcpDoSend(choice) {
+  const d = app.draft, hs = app.hcpSend;
+  if (!d || !hs || hs.busy) return;
+  const set = app.hcpSet || hcpSettings({});
+  hs.busy = true; hs.error = null; render();
+  try {
+    // Make sure the server has the latest version of this quote before it reads it.
+    const saved = updateQuoteStatus(d.status, { keepDraft: true });
+    await syncQuoteToSupabase(saved, saved.panes);
+    const { lines } = buildHcpLines(d, set);
+    const qt = hcpQuoteTokens(d);
+    const r = await callHcp('send', {
+      quoteId: d.id,
+      payload: { optionName: hcpFill(set.mapping.optionName, qt), note: hcpFill(set.mapping.note, qt), lines },
+      ...choice,
+    });
+    if (r.needsChoice) { hs.choices = r.needsChoice; return; }
+    d.hcpSync = r.sync;
+    appData.quotes = appData.quotes.map(q => q.id === d.id ? { ...q, hcpSync: r.sync } : q);
+    saveState(appData);
+    hs.result = r;
+  } catch (e) {
+    hs.error = e.message;
+  } finally {
+    hs.busy = false; render();
   }
 }
 

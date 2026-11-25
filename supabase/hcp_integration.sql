@@ -106,3 +106,39 @@ CREATE POLICY "Admins can update HCP settings" ON public.hcp_settings
 -- ---------------------------------------------------------------------
 ALTER TABLE public.quotes ADD COLUMN IF NOT EXISTS customer_details jsonb;
 ALTER TABLE public.quotes ADD COLUMN IF NOT EXISTS hcp_link jsonb;
+
+-- ---------------------------------------------------------------------
+-- Step 3: Send to HCP + sync log
+--   quotes.hcp_sync: where the quote went in HCP
+--     { kind: 'estimate'|'option'|'job', estimateId, optionId, jobId, number,
+--       label, customerId, customerName, approved, mock, sentAt }
+--     Written only by the hcp-proxy Edge Function (service role).
+--   hcp_sync_log: one row per send attempt. Admins read; only the Edge
+--   Function writes.
+-- ---------------------------------------------------------------------
+ALTER TABLE public.quotes ADD COLUMN IF NOT EXISTS hcp_sync jsonb;
+
+CREATE TABLE IF NOT EXISTS public.hcp_sync_log (
+  id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  quote_id      text,
+  quote_label   text,
+  customer_name text,
+  action        text,          -- 'create' | 'update'
+  result        text,          -- 'sent' | 'updated' | 'failed'
+  hcp_ref       text,          -- e.g. 'Estimate #1042'
+  hcp_ids       jsonb,
+  steps         jsonb,         -- plain-English list of what happened
+  error         text,
+  mock          boolean DEFAULT false,
+  line_count    integer,
+  total_cents   bigint,
+  settings_snapshot jsonb,     -- the mapping/rules used for this send
+  sent_by       uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  sent_by_name  text,
+  created_at    timestamptz DEFAULT now()
+);
+ALTER TABLE public.hcp_sync_log ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Admins can read HCP sync log" ON public.hcp_sync_log;
+CREATE POLICY "Admins can read HCP sync log" ON public.hcp_sync_log
+  FOR SELECT TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role = 'admin'));
